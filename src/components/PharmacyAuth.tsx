@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { X } from "lucide-react";
+import { api } from "@/lib/api";
 
 interface PharmacyAuthProps {
   onClose: () => void;
@@ -21,15 +22,68 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
     phone: "",
     license: ""
   });
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    onLogin();
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const response = await api.pharmacyLogin(loginData.email, loginData.password);
+      if (response.success) {
+        // Store token in localStorage
+        localStorage.setItem('authToken', response.token);
+        localStorage.setItem('userType', response.userType);
+        localStorage.setItem('userId', response.userId);
+        onLogin();
+      } else {
+        setError(response.message || "Login failed");
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      setError("Network error occurred. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    onLogin();
+    setIsLoading(true);
+    setError("");
+
+    if (registerData.password !== registerData.confirmPassword) {
+      setError("Passwords do not match");
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const response = await api.pharmacyRegister({
+        name: registerData.pharmacyName,
+        email: registerData.email,
+        password: registerData.password,
+        phone: registerData.phone,
+        license: registerData.license
+      });
+      
+      if (response.success) {
+        // Store token in localStorage
+        localStorage.setItem('authToken', response.token);
+        localStorage.setItem('userType', response.userType);
+        localStorage.setItem('userId', response.userId);
+        onLogin();
+      } else {
+        setError(response.message || "Registration failed");
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
+      setError("Network error occurred. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -54,6 +108,12 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
         </CardHeader>
 
         <CardContent>
+          {error && (
+            <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded text-red-700 text-sm">
+              {error}
+            </div>
+          )}
+          
           <Tabs defaultValue="login" className="w-full">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="login">Login</TabsTrigger>
@@ -71,6 +131,7 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
                     value={loginData.email}
                     onChange={(e) => setLoginData(prev => ({ ...prev, email: e.target.value }))}
                     required
+                    disabled={isLoading}
                   />
                 </div>
                 <div className="space-y-2">
@@ -81,10 +142,11 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
                     value={loginData.password}
                     onChange={(e) => setLoginData(prev => ({ ...prev, password: e.target.value }))}
                     required
+                    disabled={isLoading}
                   />
                 </div>
-                <Button type="submit" variant="medical" className="w-full">
-                  Sign In
+                <Button type="submit" variant="medical" className="w-full" disabled={isLoading}>
+                  {isLoading ? "Signing In..." : "Sign In"}
                 </Button>
                 <div className="text-center">
                   <Button variant="link" className="text-sm">
@@ -104,6 +166,7 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
                     value={registerData.pharmacyName}
                     onChange={(e) => setRegisterData(prev => ({ ...prev, pharmacyName: e.target.value }))}
                     required
+                    disabled={isLoading}
                   />
                 </div>
                 <div className="space-y-2">
@@ -115,6 +178,7 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
                     value={registerData.email}
                     onChange={(e) => setRegisterData(prev => ({ ...prev, email: e.target.value }))}
                     required
+                    disabled={isLoading}
                   />
                 </div>
                 <div className="space-y-2">
@@ -126,6 +190,7 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
                     value={registerData.phone}
                     onChange={(e) => setRegisterData(prev => ({ ...prev, phone: e.target.value }))}
                     required
+                    disabled={isLoading}
                   />
                 </div>
                 <div className="space-y-2">
@@ -136,6 +201,7 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
                     value={registerData.license}
                     onChange={(e) => setRegisterData(prev => ({ ...prev, license: e.target.value }))}
                     required
+                    disabled={isLoading}
                   />
                 </div>
                 <div className="space-y-2">
@@ -146,6 +212,7 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
                     value={registerData.password}
                     onChange={(e) => setRegisterData(prev => ({ ...prev, password: e.target.value }))}
                     required
+                    disabled={isLoading}
                   />
                 </div>
                 <div className="space-y-2">
@@ -156,10 +223,11 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
                     value={registerData.confirmPassword}
                     onChange={(e) => setRegisterData(prev => ({ ...prev, confirmPassword: e.target.value }))}
                     required
+                    disabled={isLoading}
                   />
                 </div>
-                <Button type="submit" variant="medical" className="w-full">
-                  Create Account
+                <Button type="submit" variant="medical" className="w-full" disabled={isLoading}>
+                  {isLoading ? "Creating Account..." : "Create Account"}
                 </Button>
               </form>
             </TabsContent>

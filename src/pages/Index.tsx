@@ -4,15 +4,40 @@ import { SearchSection } from "@/components/SearchSection";
 import { SearchResults } from "@/components/SearchResults";
 import { PharmacyAuth } from "@/components/PharmacyAuth";
 import { PharmacyDashboard } from "@/components/PharmacyDashboard";
+import { api } from "@/lib/api";
 import medicalBg from "@/assets/medical-background.jpg";
+
+interface Medicine {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  price: number;
+  stockQuantity: number;
+  pharmacyId: string;
+  pharmacyName: string;
+  location: string;
+  imageUrl: string;
+  isAvailable: boolean;
+}
 
 const Index = () => {
   const [showPharmacyAuth, setShowPharmacyAuth] = useState(false);
   const [isPharmacyLoggedIn, setIsPharmacyLoggedIn] = useState(false);
-  const [searchResults, setSearchResults] = useState<{ medicine: string; location: string } | null>(null);
+  const [searchResults, setSearchResults] = useState<{ medicine: string; location: string; medicines: Medicine[] } | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSearch = (medicine: string, location: string) => {
-    setSearchResults({ medicine, location });
+  const handleSearch = async (medicine: string, location: string) => {
+    setIsLoading(true);
+    try {
+      const response = await api.searchMedicines(medicine, location);
+      setSearchResults({ medicine, location, medicines: response.medicines || [] });
+    } catch (error) {
+      console.error('Search failed:', error);
+      setSearchResults({ medicine, location, medicines: [] });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handlePharmacyLogin = () => {
@@ -47,7 +72,8 @@ const Index = () => {
           <SearchResults 
             medicine={searchResults.medicine}
             location={searchResults.location}
-            results={[]}
+            results={searchResults.medicines}
+            isLoading={isLoading}
           />
         )}
       </main>
