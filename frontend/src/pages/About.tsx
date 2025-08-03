@@ -1,13 +1,43 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Header } from "@/components/Header";
+import { PharmacyAuth } from "@/components/PharmacyAuth";
+import { PharmacyDashboard } from "@/components/PharmacyDashboard";
 import { Heart, Shield, Users, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const About = () => {
+  const [showPharmacyAuth, setShowPharmacyAuth] = useState(false);
+  const [isPharmacyLoggedIn, setIsPharmacyLoggedIn] = useState(false);
+
+  const handlePharmacyClick = () => {
+    setShowPharmacyAuth(true);
+  };
+
+  const handlePharmacyLogin = () => {
+    setIsPharmacyLoggedIn(true);
+    setShowPharmacyAuth(false);
+  };
+
+  const handlePharmacyLogout = () => {
+    setIsPharmacyLoggedIn(false);
+  };
+
+  if (isPharmacyLoggedIn) {
+    return <PharmacyDashboard onLogout={handlePharmacyLogout} />;
+  }
+
   return (
     <div className="min-h-screen bg-background">
-      <Header onPharmacyClick={() => {}} />
+      <Header onPharmacyClick={handlePharmacyClick} />
+      
+      {showPharmacyAuth && (
+        <PharmacyAuth 
+          onLogin={handlePharmacyLogin}
+          onClose={() => setShowPharmacyAuth(false)}
+        />
+      )}
       
       <main className="max-w-6xl mx-auto px-6 py-12">
         <div className="text-center mb-12">
