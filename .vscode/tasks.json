@@ -9,6 +9,9 @@
 				"run",
 				"dev"
 			],
+			"options": {
+				"cwd": "${workspaceFolder}/frontend"
+			},
 			"group": "build",
 			"isBackground": true,
 			"problemMatcher": []
