@@ -155,26 +155,107 @@ bal test
 
 ## Configuration
 
-The application runs on port 9090 by default. You can modify the port in the `main.bal` file.
+The application runs on port 9090 by default. Database and external service credentials are read from `configurable` variables in `main.bal` and can be set via environment variables using Ballerina's configuration mechanism.
+
+Important configurable names to set (examples shown as env vars for Windows `cmd.exe`):
+
+```
+set dbHost=your-supabase-host
+set dbPort=5432
+set dbName=postgres
+set dbUsername=postgres
+set dbPassword=yourpassword
+set jwtSecret=your_jwt_secret
+set googleClientId=...
+set googleClientSecret=...
+set googleRedirectUri=http://localhost:9090/api/v1/auth/google/callback
+set pineconeApiKey=...
+set pineconeEnvironment=...
+set pineconeIndexName=...
+```
 
 ## Security Notes
 
-- This is a development version with in-memory storage
-- JWT tokens are simplified for demonstration
-- In production, implement proper password hashing and database storage
-- Use environment variables for sensitive data
+- This project now uses Postgres (Supabase) for persistent storage. Keep credentials secret and use environment variables in production.
+- JWT secrets must be strong and rotated regularly.
+- Implement production-grade password hashing (bcrypt/argon2) before storing passwords.
 
-## Next Steps
+## Next Steps & Database Migration
 
-1. Integrate with a real database (MySQL, PostgreSQL)
-2. Implement proper JWT authentication
-3. Add password hashing
-4. Add input validation
-5. Implement rate limiting
-6. Add logging and monitoring
-7. Add unit tests
-8. Implement CORS for frontend integration
+1. Create the required tables in your Postgres/Supabase database. Example SQL:
+
+```sql
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  email TEXT UNIQUE,
+  password_hash TEXT,
+  google_id TEXT,
+  avatar_url TEXT,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+);
+
+CREATE TABLE pharmacies (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  email TEXT UNIQUE,
+  password_hash TEXT,
+  phone TEXT,
+  license TEXT,
+  address TEXT,
+  city TEXT,
+  province TEXT,
+  country TEXT,
+  latitude NUMERIC,
+  longitude NUMERIC,
+  image_url TEXT,
+  is_verified BOOLEAN DEFAULT FALSE,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+);
+
+CREATE TABLE medicines (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  description TEXT,
+  price NUMERIC,
+  stock_quantity INT,
+  pharmacy_id TEXT REFERENCES pharmacies(id),
+  image_url TEXT,
+  is_available BOOLEAN DEFAULT true,
+  category_id TEXT,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+);
+
+CREATE TABLE user_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  pharmacy_id TEXT,
+  token_hash TEXT,
+  user_type TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  expires_at TIMESTAMP,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+);
+
+CREATE TABLE oauth_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  provider TEXT,
+  refresh_token TEXT,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+);
+```
+
+2. Start the backend with environment variables set (example above).
+3. Configure Pinecone if you plan to use vector search and set `pineconeApiKey`, `pineconeEnvironment`, and `pineconeIndexName`.
+4. Use the Google OAuth endpoints (`/api/v1/auth/google` and `/api/v1/auth/google/callback`) to enable Google sign-in.
 
 ## License
 
-Apache License 2.0 
+Apache License 2.0

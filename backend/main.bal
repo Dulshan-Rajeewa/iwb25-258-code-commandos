@@ -1,935 +1,882 @@
 import ballerina/http;
-import ballerina/io;
+import ballerina/log;
+import ballerina/uuid;
 import ballerina/time;
+import ballerina/regex;
 
-// ---------------- Data Types ----------------
-type Medicine record {
-    string id;
-    string name;
-    string description;
-    string category;
-    decimal price;
-    int stockQuantity;
-    string pharmacyId;
-    string pharmacyName;
-    string location;
-    string imageUrl;
-    boolean isAvailable;
-};
+configurable string supabaseUrl = "https://sjtzzxqopnyouktcgwwg.supabase.co";
+configurable string supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNqdHp6eHFvcG55b3VrdGNnd3dnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQyMjA3OTcsImV4cCI6MjA2OTc5Njc5N30.ahvznD6ER2eRz8HE5NkXMOF7epq3v3Zp3GWrvZSplWY";
 
-type Pharmacy record {
-    string id;
-    string name;
-    string email;
-    string password?; // Optional for backward compatibility
-    string phone;
-    string license;
-    string address;
-    string city;
-    string province;
-    string country;
-    decimal latitude;
-    decimal longitude;
-    string imageUrl;
-    boolean isVerified;
-};
+http:Client supabaseClient = check new (supabaseUrl, {
+    timeout: 30,
+    httpVersion: http:HTTP_1_1
+});
 
-type User record {
-    string id;
-    string email;
-    string password?; // Optional for backward compatibility
-    string name;
-    string phone;
-    string location;
-    decimal latitude;
-    decimal longitude;
-};
-
-type SearchRequest record {
-    string medicineName;
-    string location;
-    decimal? latitude;
-    decimal? longitude;
-    int? radius;
-};
-
-type SearchResponse record {
-    Medicine[] medicines;
-    int totalCount;
-    string message;
-};
-
-type AuthRequest record {
-    string email;
-    string password;
-};
-
-type AuthResponse record {
-    string token;
-    string userId;
-    string userType;
-    string message;
-    boolean success;
-};
-
-type RegisterRequest record {
-    string name;
-    string email;
-    string password;
-    string phone;
-    string? license;
-    string? address;
-    string? city;
-    string? province;
-    string? country;
-};
-
-// ---------------- Globals ----------------
-final Medicine[] medicines = [];
-final Pharmacy[] pharmacies = [];
-final User[] users = [];
-final map<string> sessions = {};
-
-string JWT_SECRET = "your-secret-key-here";
-
-// ---------------- Listener ----------------
 listener http:Listener httpListener = new (9090);
 
-// ---------------- Service ----------------
+function init() returns error? {
+    log:printInfo("MediFind Backend v3.0 starting with full Supabase integration on port 9090");
+    log:printInfo("Please ensure database tables are created in Supabase using schema.sql");
+    log:printInfo("Ready to serve requests with full Supabase integration...");
+}
 
-// Root service for basic info
-service / on httpListener {
+service on httpListener {
+    resource function options .(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
     resource function get .() returns json {
         return {
             name: "MediFind Backend API",
-            version: "1.0.0",
-            status: "running",
-            endpoints: {
-                health: "/api/v1/health",
-                search: "/api/v1/search",
-                medicines: "/api/v1/medicines",
-                pharmacies: "/api/v1/pharmacies"
-            }
+            version: "3.0.0",
+            status: "Running",
+            database: "Supabase",
+            timestamp: time:utcNow()
         };
     }
 }
 
-@http:ServiceConfig {
-    cors: {
-        allowOrigins: ["*"],
-        allowCredentials: false,
-        allowHeaders: ["Content-Type", "Authorization"],
-        allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    }
-}
 service /api/v1 on httpListener {
+    
+    resource function options .(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
 
-    // Health check
+    resource function options [string... paths](http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+    
     resource function get health() returns json {
         return {
             status: "healthy",
-            timestamp: time:utcNow().toString(),
-            "service": "MediFind Backend"
+            timestamp: time:utcNow(),
+            database: "Supabase",
+            supabaseUrl: supabaseUrl
         };
     }
 
-    // CORS preflight handler
-    resource function options .(http:Caller caller, http:Request req) returns error? {
-        http:Response response = new;
-        response.setHeader("Access-Control-Allow-Origin", "*");
-        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        response.setHeader("Access-Control-Max-Age", "86400");
-        return caller->respond(response);
+    resource function get supabase/test() returns json|error {
+        http:Response response = check supabaseClient->get("/rest/v1/", {
+            "Authorization": "Bearer " + supabaseKey,
+            "apikey": supabaseKey
+        });
+        
+        return {
+            success: true,
+            status: response.statusCode,
+            message: "Supabase connection successful"
+        };
     }
 
-    // CORS preflight handler for medicine-specific paths
-    resource function options medicines/[string id](http:Caller caller, http:Request req) returns error? {
-        http:Response response = new;
-        response.setHeader("Access-Control-Allow-Origin", "*");
-        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        response.setHeader("Access-Control-Max-Age", "86400");
-        return caller->respond(response);
+    // DATABASE SETUP ENDPOINT - Creates tables and sample data
+    resource function options setup(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
     }
 
-    // CORS preflight handler for medicines base path
-    resource function options medicines(http:Caller caller, http:Request req) returns error? {
-        http:Response response = new;
-        response.setHeader("Access-Control-Allow-Origin", "*");
-        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        response.setHeader("Access-Control-Max-Age", "86400");
-        return caller->respond(response);
-    }
-
-    // CORS preflight handler for pharmacyInfo path
-    resource function options pharmacyInfo(http:Caller caller, http:Request req) returns error? {
-        http:Response response = new;
-        response.setHeader("Access-Control-Allow-Origin", "*");
-        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        response.setHeader("Access-Control-Max-Age", "86400");
-        return caller->respond(response);
-    }
-
-    // Medicine search
-    resource function post search(http:Caller caller, http:Request req) returns error? {
-        json|error payload = req.getJsonPayload();
-        if payload is error {
-            return caller->respond({message: "Invalid JSON"});
+    resource function post setup() returns json|error {
+        log:printInfo("Starting database setup...");
+        
+        // Create sample pharmacy in Supabase
+        json demoPharmacy = {
+            "id": "demo-pharmacy-id",
+            "name": "Demo Pharmacy",
+            "email": "demo@pharmacy.com",
+            "password": "demo123",
+            "location": "Colombo, Sri Lanka",
+            "phone": "+94123456789",
+            "license_number": "PH001"
+        };
+        
+        http:Response|error pharmacyResponse = supabaseClient->post("/rest/v1/pharmacies", demoPharmacy, {
+            "Authorization": "Bearer " + supabaseKey,
+            "apikey": supabaseKey,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        });
+        
+        if pharmacyResponse is error {
+            log:printError("Failed to create demo pharmacy: " + pharmacyResponse.message());
+        } else {
+            log:printInfo("Demo pharmacy created successfully");
         }
         
-        // Extract fields safely from JSON
-        if payload is map<json> {
-            string medicineName = payload["medicineName"] is string ? <string>payload["medicineName"] : "";
-            string location = payload["location"] is string ? <string>payload["location"] : "";
-            
-            string searchTerm = medicineName.toLowerAscii();
-            Medicine[] results = [];
-            foreach var medicine in medicines {
-                if medicine.name.toLowerAscii().includes(searchTerm) ||
-                   medicine.description.toLowerAscii().includes(searchTerm) {
-                    results.push(medicine);
-                }
+        // Create sample medicines
+        json[] sampleMedicines = [
+            {
+                "id": "med-001",
+                "name": "Paracetamol",
+                "price": 25.00,
+                "description": "Pain relief and fever reducer",
+                "pharmacy_id": "demo-pharmacy-id",
+                "stock": 100
+            },
+            {
+                "id": "med-002", 
+                "name": "Amoxicillin",
+                "price": 120.50,
+                "description": "Antibiotic for bacterial infections",
+                "pharmacy_id": "demo-pharmacy-id",
+                "stock": 50
+            },
+            {
+                "id": "med-003",
+                "name": "Omeprazole", 
+                "price": 85.00,
+                "description": "Proton pump inhibitor for acid reflux",
+                "pharmacy_id": "demo-pharmacy-id",
+                "stock": 75
             }
-            SearchResponse response = {
-                medicines: results,
-                totalCount: results.length(),
-                message: "Search completed successfully"
-            };
-            return caller->respond(response);
-        } else {
-            return caller->respond({message: "Invalid JSON format"});
-        }
-    }
-
-    // Get all medicines
-    resource function get medicines(http:Caller caller) returns error? {
-        return caller->respond({medicines: medicines, totalCount: medicines.length()});
-    }
-
-    // Add medicine
-    resource function post medicines(http:Caller caller, http:Request req) returns error? {
-        // Check authentication
-        var tokenResult = req.getHeader("Authorization");
-        if tokenResult is string && tokenResult.startsWith("Bearer ") {
-            string actualToken = tokenResult.substring(7);
-            string? userId = sessions[actualToken];
-            if userId is () {
-                return caller->respond({message: "Unauthorized", success: false});
-            }
+        ];
+        
+        int medicinesCreated = 0;
+        foreach json medicine in sampleMedicines {
+            http:Response|error medicineResponse = supabaseClient->post("/rest/v1/medicines", medicine, {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            });
             
-            // Find the pharmacy that owns this session
-            Pharmacy? currentPharmacy = ();
-            foreach var pharmacy in pharmacies {
-                if pharmacy.id == userId {
-                    currentPharmacy = pharmacy;
-                    break;
-                }
-            }
-            
-            if currentPharmacy is () {
-                return caller->respond({message: "Pharmacy not found", success: false});
-            }
-            
-            json|error payload = req.getJsonPayload();
-            if payload is error {
-                return caller->respond({message: "Invalid JSON", success: false});
-            }
-            
-            // Extract fields safely from JSON
-            if payload is map<json> {
-                string name = payload["name"] is string ? <string>payload["name"] : "";
-                string description = payload["description"] is string ? <string>payload["description"] : "";
-                string category = payload["category"] is string ? <string>payload["category"] : "";
-                
-                // Handle price - could come as int, float, or decimal
-                decimal price = 0.0;
-                if payload["price"] is int {
-                    price = <decimal><int>payload["price"];
-                } else if payload["price"] is float {
-                    price = <decimal><float>payload["price"];
-                } else if payload["price"] is decimal {
-                    price = <decimal>payload["price"];
-                }
-                
-                // Handle stockQuantity - could come as int or float
-                int stockQuantity = 0;
-                if payload["stockQuantity"] is int {
-                    stockQuantity = <int>payload["stockQuantity"];
-                } else if payload["stockQuantity"] is float {
-                    stockQuantity = <int><float>payload["stockQuantity"];
-                }
-                
-                string imageUrl = payload["imageUrl"] is string ? <string>payload["imageUrl"] : "";
-                
-                Medicine newMedicine = {
-                    id: generateId(),
-                    name: name,
-                    description: description,
-                    category: category,
-                    price: price,
-                    stockQuantity: stockQuantity,
-                    pharmacyId: currentPharmacy.id,
-                    pharmacyName: currentPharmacy.name,
-                    location: currentPharmacy.city + ", " + currentPharmacy.province,
-                    imageUrl: imageUrl,
-                    isAvailable: stockQuantity > 0
-                };
-                
-                medicines.push(newMedicine);
-                return caller->respond({
-                    message: "Medicine added successfully", 
-                    medicine: newMedicine,
-                    success: true
-                });
+            if medicineResponse is error {
+                log:printError("Failed to create medicine: " + medicine.toString() + " - " + medicineResponse.message());
             } else {
-                return caller->respond({message: "Invalid JSON format", success: false});
+                medicinesCreated = medicinesCreated + 1;
             }
-        } else {
-            return caller->respond({message: "Authorization header required", success: false});
-        }
-    }
-
-    // Update medicine
-    resource function put medicines/[string id](http:Caller caller, http:Request req) returns error? {
-        // Check authentication
-        var tokenResult = req.getHeader("Authorization");
-        if tokenResult is string && tokenResult.startsWith("Bearer ") {
-            string actualToken = tokenResult.substring(7);
-            string? userId = sessions[actualToken];
-            if userId is () {
-                return caller->respond({message: "Unauthorized", success: false});
-            }
-            
-            // Find the pharmacy that owns this session
-            Pharmacy? currentPharmacy = ();
-            foreach var pharmacy in pharmacies {
-                if pharmacy.id == userId {
-                    currentPharmacy = pharmacy;
-                    break;
-                }
-            }
-            
-            if currentPharmacy is () {
-                return caller->respond({message: "Pharmacy not found", success: false});
-            }
-            
-            json|error payload = req.getJsonPayload();
-            if payload is error {
-                return caller->respond({message: "Invalid JSON", success: false});
-            }
-            
-            // Find the medicine to update
-            foreach int i in 0 ..< medicines.length() {
-                if medicines[i].id == id {
-                    // Check if this pharmacy owns this medicine
-                    if medicines[i].pharmacyId != currentPharmacy.id {
-                        return caller->respond({message: "Unauthorized: You can only edit your own medicines", success: false});
-                    }
-                    
-                    // Extract fields safely from JSON
-                    if payload is map<json> {
-                        string name = payload["name"] is string ? <string>payload["name"] : medicines[i].name;
-                        string description = payload["description"] is string ? <string>payload["description"] : medicines[i].description;
-                        string category = payload["category"] is string ? <string>payload["category"] : medicines[i].category;
-                        
-                        // Handle price - could come as int, float, or decimal
-                        decimal price = medicines[i].price;
-                        if payload["price"] is int {
-                            price = <decimal><int>payload["price"];
-                        } else if payload["price"] is float {
-                            price = <decimal><float>payload["price"];
-                        } else if payload["price"] is decimal {
-                            price = <decimal>payload["price"];
-                        }
-                        
-                        // Handle stockQuantity - could come as int or float
-                        int stockQuantity = medicines[i].stockQuantity;
-                        if payload["stockQuantity"] is int {
-                            stockQuantity = <int>payload["stockQuantity"];
-                        } else if payload["stockQuantity"] is float {
-                            stockQuantity = <int><float>payload["stockQuantity"];
-                        }
-                        
-                        string imageUrl = payload["imageUrl"] is string ? <string>payload["imageUrl"] : medicines[i].imageUrl;
-                        
-                        Medicine updatedMedicine = {
-                            id: id,
-                            name: name,
-                            description: description,
-                            category: category,
-                            price: price,
-                            stockQuantity: stockQuantity,
-                            pharmacyId: currentPharmacy.id,
-                            pharmacyName: currentPharmacy.name,
-                            location: currentPharmacy.city + ", " + currentPharmacy.province,
-                            imageUrl: imageUrl,
-                            isAvailable: stockQuantity > 0
-                        };
-                        
-                        medicines[i] = updatedMedicine;
-                        return caller->respond({
-                            message: "Medicine updated successfully", 
-                            medicine: updatedMedicine,
-                            success: true
-                        });
-                    } else {
-                        return caller->respond({message: "Invalid JSON format", success: false});
-                    }
-                }
-            }
-            return caller->respond({message: "Medicine not found", success: false});
-        } else {
-            return caller->respond({message: "Authorization header required", success: false});
-        }
-    }
-
-    // Delete medicine
-    resource function delete medicines/[string id](http:Caller caller, http:Request req) returns error? {
-        // Check authentication
-        var tokenResult = req.getHeader("Authorization");
-        if tokenResult is string && tokenResult.startsWith("Bearer ") {
-            string actualToken = tokenResult.substring(7);
-            string? userId = sessions[actualToken];
-            if userId is () {
-                return caller->respond({message: "Unauthorized", success: false});
-            }
-            
-            // Find the pharmacy that owns this session
-            Pharmacy? currentPharmacy = ();
-            foreach var pharmacy in pharmacies {
-                if pharmacy.id == userId {
-                    currentPharmacy = pharmacy;
-                    break;
-                }
-            }
-            
-            if currentPharmacy is () {
-                return caller->respond({message: "Pharmacy not found", success: false});
-            }
-            
-            // Find and delete the medicine
-            foreach int i in 0 ..< medicines.length() {
-                if medicines[i].id == id {
-                    // Check if this pharmacy owns this medicine
-                    if medicines[i].pharmacyId != currentPharmacy.id {
-                        return caller->respond({message: "Unauthorized: You can only delete your own medicines", success: false});
-                    }
-                    
-                    _ = medicines.remove(i);
-                    return caller->respond({message: "Medicine deleted successfully", success: true});
-                }
-            }
-            return caller->respond({message: "Medicine not found", success: false});
-        } else {
-            return caller->respond({message: "Authorization header required", success: false});
-        }
-    }
-
-    // Pharmacy login
-    resource function post pharmacyLogin(http:Caller caller, http:Request req) returns error? {
-        json|error payload = req.getJsonPayload();
-        if payload is error {
-            return caller->respond({message: "Invalid JSON"});
         }
         
-        // Extract fields safely from JSON
-        if payload is map<json> {
-            string email = payload["email"] is string ? <string>payload["email"] : "";
-            string password = payload["password"] is string ? <string>payload["password"] : "";
-            
-            Pharmacy? foundPharmacy = ();
-            foreach var pharmacy in pharmacies {
-                if pharmacy.email == email {
-                    foundPharmacy = pharmacy;
-                    break;
-                }
-            }
-            if foundPharmacy is Pharmacy {
-                // For existing pharmacies without password or for demo purposes, accept any password
-                // In production, you'd want to hash and compare passwords properly
-                if (foundPharmacy.password is () || foundPharmacy.password == password || password == "demo123") {
-                    string token = generateJWT(foundPharmacy.id, "pharmacy");
-                    sessions[token] = foundPharmacy.id;
-                    return caller->respond({
-                        token: token,
-                        userId: foundPharmacy.id,
-                        userType: "pharmacy",
-                        message: "Login successful",
-                        success: true
-                    });
-                } else {
-                    return caller->respond({message: "Invalid password", success: false});
-                }
-            }
-            return caller->respond({message: "Pharmacy not found", success: false});
-        } else {
-            return caller->respond({message: "Invalid JSON format", success: false});
-        }
+        return {
+            success: true,
+            message: "Database setup completed",
+            pharmacyCreated: pharmacyResponse is http:Response,
+            medicinesCreated: medicinesCreated,
+            note: "You can now login with demo@pharmacy.com / demo123"
+        };
     }
 
-    // Pharmacy register
-    resource function post pharmacyRegister(http:Caller caller, http:Request req) returns error? {
-        json|error payload = req.getJsonPayload();
-        if payload is error {
-            return caller->respond({message: "Invalid JSON"});
-        }
-        
-        // Extract fields safely from JSON
-        if payload is map<json> {
-            string name = payload["name"] is string ? <string>payload["name"] : "";
-            string email = payload["email"] is string ? <string>payload["email"] : "";
-            string password = payload["password"] is string ? <string>payload["password"] : "";
-            string phone = payload["phone"] is string ? <string>payload["phone"] : "";
-            string license = payload["license"] is string ? <string>payload["license"] : "";
-            string address = payload["address"] is string ? <string>payload["address"] : "";
-            string city = payload["city"] is string ? <string>payload["city"] : "";
-            string province = payload["province"] is string ? <string>payload["province"] : "";
-            string country = payload["country"] is string ? <string>payload["country"] : "";
-            
-            // Check if pharmacy already exists
-            foreach var pharmacy in pharmacies {
-                if pharmacy.email == email {
-                    return caller->respond({message: "Pharmacy with this email already exists", success: false});
-                }
-            }
-            
-            Pharmacy newPharmacy = {
-                id: generateId(),
-                name: name,
-                email: email,
-                password: password, // Store the password
-                phone: phone,
-                license: license,
-                address: address,
-                city: city,
-                province: province,
-                country: country,
-                latitude: 0.0,
-                longitude: 0.0,
-                imageUrl: "",
-                isVerified: false
-            };
-            pharmacies.push(newPharmacy);
-            string token = generateJWT(newPharmacy.id, "pharmacy");
-            sessions[token] = newPharmacy.id;
-            return caller->respond({
-                token: token,
-                userId: newPharmacy.id,
-                userType: "pharmacy",
-                message: "Registration successful",
-                success: true
+    // PHARMACY LOGIN
+    resource function options pharmacyLogin(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    resource function post pharmacyLogin(@http:Payload json loginReq) returns http:Response|error {
+        if loginReq is map<json> {
+            string email = loginReq["email"].toString();
+            string password = loginReq["password"].toString();
+
+            // Find pharmacy by email and password in Supabase
+            http:Response response = check supabaseClient->get("/rest/v1/pharmacies?email=eq." + email + "&password=eq." + password, {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json"
             });
-        } else {
-            return caller->respond({message: "Invalid JSON format", success: false});
-        }
-    }
 
-    // User login
-    resource function post userLogin(http:Caller caller, http:Request req) returns error? {
-        json|error payload = req.getJsonPayload();
-        if payload is error {
-            return caller->respond({message: "Invalid JSON"});
-        }
-        
-        // Extract fields safely from JSON
-        if payload is map<json> {
-            string email = payload["email"] is string ? <string>payload["email"] : "";
-            string password = payload["password"] is string ? <string>payload["password"] : "";
-            
-            User? foundUser = ();
-            foreach var user in users {
-                if user.email == email {
-                    foundUser = user;
-                    break;
+            if response.statusCode != 200 {
+                return createErrorResponse(500, "Failed to authenticate with database");
+            }
+
+            json pharmacies = check response.getJsonPayload();
+            if pharmacies is json[] && pharmacies.length() > 0 {
+                json pharmacy = pharmacies[0];
+                string pharmacyId = "";
+                if pharmacy is map<json> {
+                    anydata idValue = pharmacy["id"];
+                    if idValue is string {
+                        pharmacyId = idValue;
+                    }
                 }
-            }
-            if foundUser is User {
-                // For existing users without password or for demo purposes, accept any password
-                // In production, you'd want to hash and compare passwords properly
-                if (foundUser.password is () || foundUser.password == password || password == "demo123") {
-                    string token = generateJWT(foundUser.id, "user");
-                    sessions[token] = foundUser.id;
-                    return caller->respond({
-                        token: token,
-                        userId: foundUser.id,
-                        userType: "user",
-                        message: "Login successful",
-                        success: true
-                    });
-                } else {
-                    return caller->respond({message: "Invalid password", success: false});
-                }
-            }
-            return caller->respond({message: "User not found", success: false});
-        } else {
-            return caller->respond({message: "Invalid JSON format", success: false});
-        }
-    }
 
-    // Generic auth endpoints for compatibility
-    resource function post auth/login(http:Caller caller, http:Request req) returns error? {
-        // Forward to pharmacy login for now (could be enhanced to detect user type)
-        json|error payload = req.getJsonPayload();
-        if payload is error {
-            return caller->respond({message: "Invalid JSON"});
-        }
-        
-        // Extract fields safely from JSON
-        if payload is map<json> {
-            string email = payload["email"] is string ? <string>payload["email"] : "";
-            string password = payload["password"] is string ? <string>payload["password"] : "";
-            
-            Pharmacy? foundPharmacy = ();
-            foreach var pharmacy in pharmacies {
-                if pharmacy.email == email {
-                    foundPharmacy = pharmacy;
-                    break;
-                }
-            }
-            if foundPharmacy is Pharmacy {
-                // For existing pharmacies without password or for demo purposes, accept any password
-                // In production, you'd want to hash and compare passwords properly
-                if (foundPharmacy.password is () || foundPharmacy.password == password || password == "demo123") {
-                    string token = generateJWT(foundPharmacy.id, "pharmacy");
-                    sessions[token] = foundPharmacy.id;
-                    return caller->respond({
-                        token: token,
-                        userId: foundPharmacy.id,
-                        userType: "pharmacy",
-                        message: "Login successful",
-                        success: true
-                    });
-                } else {
-                    return caller->respond({message: "Invalid password", success: false});
-                }
-            }
-            return caller->respond({message: "Pharmacy not found", success: false});
-        } else {
-            return caller->respond({message: "Invalid JSON format", success: false});
-        }
-    }
+                // Generate session token
+                string token = generateSessionToken(pharmacyId);
 
-    // User register
-    resource function post userRegister(http:Caller caller, http:Request req) returns error? {
-        json|error payload = req.getJsonPayload();
-        if payload is error {
-            return caller->respond({message: "Invalid JSON"});
-        }
-        
-        // Extract fields safely from JSON
-        if payload is map<json> {
-            string name = payload["name"] is string ? <string>payload["name"] : "";
-            string email = payload["email"] is string ? <string>payload["email"] : "";
-            string password = payload["password"] is string ? <string>payload["password"] : "";
-            string phone = payload["phone"] is string ? <string>payload["phone"] : "";
-            
-            // Check if user already exists
-            foreach var user in users {
-                if user.email == email {
-                    return caller->respond({message: "User with this email already exists", success: false});
-                }
-            }
-            
-            User newUser = {
-                id: generateId(),
-                name: name,
-                email: email,
-                password: password, // Store the password
-                phone: phone,
-                location: "",
-                latitude: 0.0,
-                longitude: 0.0
-            };
-            users.push(newUser);
-            string token = generateJWT(newUser.id, "user");
-            sessions[token] = newUser.id;
-            return caller->respond({
-                token: token,
-                userId: newUser.id,
-                userType: "user",
-                message: "Registration successful",
-                success: true
-            });
-        } else {
-            return caller->respond({message: "Invalid JSON format", success: false});
-        }
-    }
-
-    // Get all pharmacies
-    resource function get pharmacies(http:Caller caller) returns error? {
-        return caller->respond({pharmacies: pharmacies, totalCount: pharmacies.length()});
-    }
-
-    // Get pharmacy by ID
-    resource function get pharmacy(http:Caller caller, string id) returns error? {
-        foreach var pharmacy in pharmacies {
-            if pharmacy.id == id {
-                return caller->respond(pharmacy);
-            }
-        }
-        return caller->respond({message: "Pharmacy not found"});
-    }
-
-    // Get medicines by pharmacy ID
-    resource function get pharmacyMedicines(http:Caller caller, string id) returns error? {
-        Medicine[] pharmacyMedicines = [];
-        foreach var medicine in medicines {
-            if medicine.pharmacyId == id {
-                pharmacyMedicines.push(medicine);
-            }
-        }
-        return caller->respond({medicines: pharmacyMedicines, totalCount: pharmacyMedicines.length()});
-    }
-
-    // Get current pharmacy info (authenticated)
-    resource function get pharmacyInfo(http:Caller caller, http:Request req) returns error? {
-        // Check authentication
-        var tokenResult = req.getHeader("Authorization");
-        if tokenResult is string && tokenResult.startsWith("Bearer ") {
-            string actualToken = tokenResult.substring(7);
-            string? userId = sessions[actualToken];
-            if userId is () {
-                return caller->respond({message: "Invalid or expired token", success: false});
-            }
-            
-            // Find the pharmacy that owns this session
-            Pharmacy? currentPharmacy = ();
-            foreach var pharmacy in pharmacies {
-                if pharmacy.id == userId {
-                    currentPharmacy = pharmacy;
-                    break;
-                }
-            }
-            
-            if currentPharmacy is () {
-                return caller->respond({message: "Pharmacy not found", success: false});
-            }
-            
-            // Return pharmacy info without password
-            Pharmacy responsePharmacy = {
-                id: currentPharmacy.id,
-                name: currentPharmacy.name,
-                email: currentPharmacy.email,
-                phone: currentPharmacy.phone,
-                license: currentPharmacy.license,
-                address: currentPharmacy.address,
-                city: currentPharmacy.city,
-                province: currentPharmacy.province,
-                country: currentPharmacy.country,
-                latitude: currentPharmacy.latitude,
-                longitude: currentPharmacy.longitude,
-                imageUrl: currentPharmacy.imageUrl,
-                isVerified: currentPharmacy.isVerified
-            };
-            
-            return caller->respond({pharmacy: responsePharmacy, success: true});
-        } else {
-            return caller->respond({message: "Authorization header required", success: false});
-        }
-    }
-
-    // Update current pharmacy info (authenticated)
-    resource function put pharmacyInfo(http:Caller caller, http:Request req) returns error? {
-        // Check authentication
-        var tokenResult = req.getHeader("Authorization");
-        if tokenResult is string && tokenResult.startsWith("Bearer ") {
-            string actualToken = tokenResult.substring(7);
-            string? userId = sessions[actualToken];
-            if userId is () {
-                return caller->respond({message: "Invalid or expired token", success: false});
-            }
-            
-            // Find the pharmacy that owns this session
-            Pharmacy? currentPharmacy = ();
-            int pharmacyIndex = -1;
-            foreach int i in 0 ..< pharmacies.length() {
-                if pharmacies[i].id == userId {
-                    currentPharmacy = pharmacies[i];
-                    pharmacyIndex = i;
-                    break;
-                }
-            }
-            
-            if currentPharmacy is () {
-                return caller->respond({message: "Pharmacy not found", success: false});
-            }
-            
-            json|error payload = req.getJsonPayload();
-            if payload is error {
-                return caller->respond({message: "Invalid JSON", success: false});
-            }
-            
-            // Extract fields safely from JSON
-            if payload is map<json> {
-                string name = payload["name"] is string ? <string>payload["name"] : currentPharmacy.name;
-                string email = payload["email"] is string ? <string>payload["email"] : currentPharmacy.email;
-                string phone = payload["phone"] is string ? <string>payload["phone"] : currentPharmacy.phone;
-                string address = payload["address"] is string ? <string>payload["address"] : currentPharmacy.address;
-                string city = payload["city"] is string ? <string>payload["city"] : currentPharmacy.city;
-                string province = payload["province"] is string ? <string>payload["province"] : currentPharmacy.province;
-                string country = payload["country"] is string ? <string>payload["country"] : currentPharmacy.country;
-                string imageUrl = payload["imageUrl"] is string ? <string>payload["imageUrl"] : currentPharmacy.imageUrl;
-                string description = payload["description"] is string ? <string>payload["description"] : "";
-                
-                // Update the pharmacy
-                Pharmacy updatedPharmacy = {
-                    id: currentPharmacy.id,
-                    name: name,
-                    email: email,
-                    password: currentPharmacy.password,
-                    phone: phone,
-                    license: currentPharmacy.license,
-                    address: address,
-                    city: city,
-                    province: province,
-                    country: country,
-                    latitude: currentPharmacy.latitude,
-                    longitude: currentPharmacy.longitude,
-                    imageUrl: imageUrl,
-                    isVerified: currentPharmacy.isVerified
-                };
-                
-                pharmacies[pharmacyIndex] = updatedPharmacy;
-                
-                // Return success response
-                return caller->respond({
-                    message: "Pharmacy information updated successfully",
+                http:Response res = new;
+                res.setHeader("Access-Control-Allow-Origin", "*");
+                res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                res.setHeader("Content-Type", "application/json");
+                res.setJsonPayload({
                     success: true,
-                    pharmacy: {
-                        id: updatedPharmacy.id,
-                        name: updatedPharmacy.name,
-                        email: updatedPharmacy.email,
-                        phone: updatedPharmacy.phone,
-                        license: updatedPharmacy.license,
-                        address: updatedPharmacy.address,
-                        city: updatedPharmacy.city,
-                        province: updatedPharmacy.province,
-                        country: updatedPharmacy.country,
-                        latitude: updatedPharmacy.latitude,
-                        longitude: updatedPharmacy.longitude,
-                        imageUrl: updatedPharmacy.imageUrl,
-                        isVerified: updatedPharmacy.isVerified
-                    }
+                    token: token,
+                    userId: pharmacyId,
+                    userType: "pharmacy",
+                    message: "Login successful with Supabase authentication"
                 });
-            } else {
-                return caller->respond({message: "Invalid JSON format", success: false});
+                return res;
             }
-        } else {
-            return caller->respond({message: "Authorization header required", success: false});
+
+            return createErrorResponse(401, "Invalid credentials");
         }
+
+        return createErrorResponse(400, "Invalid login data");
     }
 
-    // Logout
-    resource function post logout(http:Caller caller, http:Request req) returns error? {
-        var tokenResult = req.getHeader("Authorization");
-        if tokenResult is string && tokenResult.startsWith("Bearer ") {
-            string actualToken = tokenResult.substring(7);
-            _ = sessions.remove(actualToken);
+    // PHARMACY REGISTRATION
+    resource function options pharmacyRegister(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    resource function post pharmacyRegister(@http:Payload json pharmacyReq) returns http:Response|error {
+        if pharmacyReq is map<json> {
+            string pharmacyId = uuid:createType4AsString();
+            
+            json pharmacy = {
+                "id": pharmacyId,
+                "name": pharmacyReq["name"],
+                "email": pharmacyReq["email"],
+                "password": pharmacyReq["password"],
+                "location": pharmacyReq["location"] ?: "",
+                "phone": pharmacyReq["phone"] ?: "",
+                "license_number": pharmacyReq["licenseNumber"] ?: ""
+            };
+
+            // Check if email already exists
+            http:Response|error checkResponse = supabaseClient->get("/rest/v1/pharmacies?email=eq." + pharmacyReq["email"].toString(), {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json"
+            });
+
+            if checkResponse is error {
+                log:printError("Supabase connection failed: " + checkResponse.message());
+                return createErrorResponse(500, "Database connection failed. Please ensure Supabase tables are created using schema.sql");
+            }
+
+            json|error existingPharmacies = checkResponse.getJsonPayload();
+            if existingPharmacies is error {
+                log:printError("Failed to parse Supabase response: " + existingPharmacies.message());
+                return createErrorResponse(500, "Database error. Tables may not exist. Please create tables using schema.sql");
+            }
+
+            if existingPharmacies is json[] && existingPharmacies.length() > 0 {
+                return createErrorResponse(409, "Pharmacy with this email already exists");
+            }
+
+            // Store in Supabase
+            http:Response|error response = supabaseClient->post("/rest/v1/pharmacies", pharmacy, {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
+            });
+
+            if response is error {
+                log:printError("Failed to insert into Supabase: " + response.message());
+                return createErrorResponse(500, "Failed to register pharmacy. Please ensure database tables are created using schema.sql");
+            }
+
+            if response.statusCode != 201 {
+                // Get the error details from Supabase
+                json|error errorPayload = response.getJsonPayload();
+                string errorMsg = "Unknown error";
+                if errorPayload is json {
+                    errorMsg = errorPayload.toString();
+                }
+                log:printError("Supabase insert failed with status: " + response.statusCode.toString() + " - " + errorMsg);
+                return createErrorResponse(500, "Failed to register pharmacy in database. Error: " + errorMsg);
+            }
+
+            json|error createdPharmacy = response.getJsonPayload();
+            if createdPharmacy is error {
+                log:printError("Failed to parse created pharmacy: " + createdPharmacy.message());
+            }
+            
+            // Generate session token for auto-login after registration
+            string token = generateSessionToken(pharmacyId);
+            
+            http:Response res = new;
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            res.setHeader("Content-Type", "application/json");
+            res.setJsonPayload({
+                success: true,
+                message: "Pharmacy registered successfully in Supabase",
+                token: token,
+                userId: pharmacyId,
+                userType: "pharmacy"
+            });
+            return res;
         }
-        return caller->respond({message: "Logged out successfully"});
+
+        return createErrorResponse(400, "Invalid pharmacy data");
+    }
+
+    // MEDICINES ENDPOINTS
+    resource function options medicines(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    resource function get medicines(http:Request req) returns http:Response|error {
+        string|http:HeaderNotFoundError authHeader = req.getHeader("Authorization");
+        string? pharmacyId = validateToken(authHeader is string ? authHeader : ());
+        
+        if pharmacyId is () {
+            return createErrorResponse(401, "Unauthorized access");
+        }
+
+        // Get medicines from Supabase
+        http:Response response = check supabaseClient->get("/rest/v1/medicines?pharmacy_id=eq." + pharmacyId, {
+            "Authorization": "Bearer " + supabaseKey,
+            "apikey": supabaseKey,
+            "Content-Type": "application/json"
+        });
+
+        if response.statusCode != 200 {
+            return createErrorResponse(500, "Failed to fetch medicines from database");
+        }
+
+        json medicines = check response.getJsonPayload();
+        
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.setHeader("Content-Type", "application/json");
+        res.setJsonPayload({
+            medicines: medicines,
+            message: "Medicines fetched successfully from Supabase",
+            timestamp: time:utcNow()
+        });
+        return res;
+    }
+
+    resource function post medicines(@http:Payload json medicineReq, http:Request req) returns http:Response|error {
+        string|http:HeaderNotFoundError authHeader = req.getHeader("Authorization");
+        string? pharmacyId = validateToken(authHeader is string ? authHeader : ());
+        
+        if pharmacyId is () {
+            return createErrorResponse(401, "Unauthorized access");
+        }
+
+        if medicineReq is map<json> {
+            string medicineId = uuid:createType4AsString();
+            
+            // Process price field
+            float price = 0.0;
+            anydata priceValue = medicineReq["price"];
+            if priceValue is float {
+                price = priceValue;
+            } else if priceValue is int {
+                price = <float>priceValue;
+            } else if priceValue is string {
+                price = check float:fromString(priceValue);
+            }
+
+            json medicine = {
+                "id": medicineId,
+                "name": medicineReq["name"],
+                "price": price,
+                "description": medicineReq["description"] ?: "",
+                "category": medicineReq["category"] ?: "General",
+                "pharmacy_id": pharmacyId,
+                "stock": medicineReq["stock"] ?: 0,
+                "status": medicineReq["status"] ?: "available",
+                "manufacturer": medicineReq["manufacturer"] ?: "",
+                "expiry_date": medicineReq["expiry_date"] ?: ()
+            };
+
+            // Store in Supabase
+            http:Response response = check supabaseClient->post("/rest/v1/medicines", medicine, {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
+            });
+
+            if response.statusCode != 201 {
+                json|error errorPayload = response.getJsonPayload();
+                string errorMsg = "Unknown error";
+                if errorPayload is json {
+                    errorMsg = errorPayload.toString();
+                }
+                log:printError("Supabase medicine creation failed: " + errorMsg + " (Status: " + response.statusCode.toString() + ")");
+                return createErrorResponse(500, "Failed to add medicine to database: " + errorMsg);
+            }
+
+            json createdMedicine = check response.getJsonPayload();
+            
+            http:Response res = new;
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            res.setHeader("Content-Type", "application/json");
+            res.setJsonPayload({
+                success: true,
+                message: "Medicine added successfully to Supabase",
+                medicine: createdMedicine
+            });
+            return res;
+        }
+
+        return createErrorResponse(400, "Invalid medicine data");
+    }
+
+    resource function put medicines/[string medicineId](@http:Payload json medicineReq, http:Request req) returns http:Response|error {
+        string|http:HeaderNotFoundError authHeader = req.getHeader("Authorization");
+        string? pharmacyId = validateToken(authHeader is string ? authHeader : ());
+        
+        if pharmacyId is () {
+            return createErrorResponse(401, "Unauthorized access");
+        }
+
+        if medicineReq is map<json> {
+            // Build update object with only provided fields
+            map<json> updateData = {};
+            
+            if medicineReq.hasKey("name") {
+                updateData["name"] = medicineReq["name"];
+            }
+            if medicineReq.hasKey("price") {
+                float price = 0.0;
+                anydata priceValue = medicineReq["price"];
+                if priceValue is float {
+                    price = priceValue;
+                } else if priceValue is int {
+                    price = <float>priceValue;
+                } else if priceValue is string {
+                    price = check float:fromString(priceValue);
+                }
+                updateData["price"] = price;
+            }
+            if medicineReq.hasKey("description") {
+                updateData["description"] = medicineReq["description"];
+            }
+            if medicineReq.hasKey("category") {
+                updateData["category"] = medicineReq["category"];
+            }
+            if medicineReq.hasKey("stock") {
+                updateData["stock"] = medicineReq["stock"];
+            }
+            if medicineReq.hasKey("status") {
+                updateData["status"] = medicineReq["status"];
+            }
+            if medicineReq.hasKey("expiry_date") {
+                updateData["expiry_date"] = medicineReq["expiry_date"];
+            }
+            if medicineReq.hasKey("manufacturer") {
+                updateData["manufacturer"] = medicineReq["manufacturer"];
+            }
+
+            // Update in Supabase with pharmacy ownership check
+            http:Response response = check supabaseClient->patch("/rest/v1/medicines?id=eq." + medicineId + "&pharmacy_id=eq." + pharmacyId, updateData, {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
+            });
+
+            if response.statusCode != 200 {
+                json|error errorPayload = response.getJsonPayload();
+                string errorMsg = "Unknown error";
+                if errorPayload is json {
+                    errorMsg = errorPayload.toString();
+                }
+                return createErrorResponse(500, "Failed to update medicine: " + errorMsg);
+            }
+
+            json|error updatedMedicine = response.getJsonPayload();
+            if updatedMedicine is error {
+                return createErrorResponse(500, "Update successful but failed to retrieve updated data");
+            }
+
+            http:Response res = new;
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            res.setHeader("Content-Type", "application/json");
+            res.setJsonPayload({
+                success: true,
+                medicine: updatedMedicine,
+                message: "Medicine updated successfully"
+            });
+            return res;
+        }
+
+        return createErrorResponse(400, "Invalid update data");
+    }
+
+    // ANALYTICS ENDPOINT
+    resource function options analytics(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    resource function get analytics(http:Request req) returns http:Response|error {
+        string|http:HeaderNotFoundError authHeader = req.getHeader("Authorization");
+        string? pharmacyId = validateToken(authHeader is string ? authHeader : ());
+        
+        if pharmacyId is () {
+            return createErrorResponse(401, "Unauthorized access");
+        }
+
+        // Get medicines with analytics data from Supabase
+        http:Response response = check supabaseClient->get("/rest/v1/medicines?pharmacy_id=eq." + pharmacyId, {
+            "Authorization": "Bearer " + supabaseKey,
+            "apikey": supabaseKey,
+            "Content-Type": "application/json"
+        });
+
+        if response.statusCode != 200 {
+            return createErrorResponse(500, "Failed to fetch medicines from database");
+        }
+
+        json medicines = check response.getJsonPayload();
+        
+        // Calculate analytics
+        int totalMedicines = 0;
+        int lowStockItems = 0;
+        int outOfStockItems = 0;
+        float totalInventoryValue = 0.0;
+        json[] categoryStats = [];
+        json[] statusStats = [];
+        
+        if medicines is json[] {
+            totalMedicines = medicines.length();
+            
+            // Category and status tracking
+            map<int> categoryCount = {};
+            map<int> statusCount = {};
+            
+            foreach json medicine in medicines {
+                if medicine is map<json> {
+                    // Stock analysis
+                    anydata stockValue = medicine["stock"];
+                    int stock = 0;
+                    if stockValue is int {
+                        stock = stockValue;
+                    }
+                    
+                    if stock == 0 {
+                        outOfStockItems = outOfStockItems + 1;
+                    } else if stock <= 10 {
+                        lowStockItems = lowStockItems + 1;
+                    }
+                    
+                    // Inventory value calculation
+                    anydata priceValue = medicine["price"];
+                    float price = 0.0;
+                    if priceValue is float {
+                        price = priceValue;
+                    } else if priceValue is int {
+                        price = <float>priceValue;
+                    }
+                    totalInventoryValue = totalInventoryValue + (price * <float>stock);
+                    
+                    // Category stats
+                    anydata categoryValue = medicine["category"];
+                    string category = "General";
+                    if categoryValue is string {
+                        category = categoryValue;
+                    }
+                    
+                    if categoryCount.hasKey(category) {
+                        categoryCount[category] = categoryCount.get(category) + 1;
+                    } else {
+                        categoryCount[category] = 1;
+                    }
+                    
+                    // Status stats
+                    anydata statusValue = medicine["status"];
+                    string status = "available";
+                    if statusValue is string {
+                        status = statusValue;
+                    }
+                    
+                    if statusCount.hasKey(status) {
+                        statusCount[status] = statusCount.get(status) + 1;
+                    } else {
+                        statusCount[status] = 1;
+                    }
+                }
+            }
+            
+            // Convert maps to arrays
+            foreach var [category, count] in categoryCount.entries() {
+                categoryStats.push({
+                    "category": category,
+                    "count": count
+                });
+            }
+            
+            foreach var [status, count] in statusCount.entries() {
+                statusStats.push({
+                    "status": status,
+                    "count": count
+                });
+            }
+        }
+        
+        json analyticsData = {
+            "totalMedicines": totalMedicines,
+            "lowStockItems": lowStockItems,
+            "outOfStockItems": outOfStockItems,
+            "totalInventoryValue": totalInventoryValue,
+            "categoryBreakdown": categoryStats,
+            "statusBreakdown": statusStats,
+            "timestamp": time:utcNow()
+        };
+
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.setHeader("Content-Type", "application/json");
+        res.setJsonPayload({
+            success: true,
+            analytics: analyticsData,
+            message: "Analytics data generated successfully"
+        });
+        return res;
+    }
+
+    // SEARCH ENDPOINT
+    resource function options search(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    resource function post search(@http:Payload json searchReq) returns http:Response|error {
+        string medicineName = "";
+        if searchReq is map<json> {
+            anydata medNameValue = searchReq["medicineName"];
+            if medNameValue is string {
+                medicineName = medNameValue;
+            }
+        }
+        
+        // Search medicines in Supabase using ilike for case-insensitive partial matching
+        string searchQuery = "/rest/v1/medicines?name=ilike.*" + medicineName + "*";
+        http:Response response = check supabaseClient->get(searchQuery, {
+            "Authorization": "Bearer " + supabaseKey,
+            "apikey": supabaseKey,
+            "Content-Type": "application/json"
+        });
+
+        if response.statusCode != 200 {
+            return createErrorResponse(500, "Failed to search medicines in database");
+        }
+
+        json medicines = check response.getJsonPayload();
+        int totalCount = 0;
+        if medicines is json[] {
+            totalCount = medicines.length();
+        }
+
+        json responseBody = {
+            medicines: medicines,
+            totalCount: totalCount,
+            searchTerm: medicineName,
+            message: totalCount > 0 ? "Search completed successfully" : "No medicines found",
+            dataSource: "Supabase Database"
+        };
+
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.setHeader("Content-Type", "application/json");
+        res.setJsonPayload(responseBody);
+        return res;
+    }
+
+    // PHARMACY INFO
+    resource function options pharmacyInfo(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    resource function get pharmacyInfo(http:Request req) returns http:Response|error {
+        string|http:HeaderNotFoundError authHeader = req.getHeader("Authorization");
+        string? pharmacyId = validateToken(authHeader is string ? authHeader : ());
+        
+        if pharmacyId is () {
+            return createErrorResponse(401, "Unauthorized access");
+        }
+
+        // Get pharmacy info from Supabase
+        http:Response response = check supabaseClient->get("/rest/v1/pharmacies?id=eq." + pharmacyId, {
+            "Authorization": "Bearer " + supabaseKey,
+            "apikey": supabaseKey,
+            "Content-Type": "application/json"
+        });
+
+        if response.statusCode != 200 {
+            return createErrorResponse(500, "Failed to fetch pharmacy info from database");
+        }
+
+        json pharmacies = check response.getJsonPayload();
+        if pharmacies is json[] && pharmacies.length() > 0 {
+            json pharmacy = pharmacies[0];
+            
+            http:Response res = new;
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            res.setHeader("Content-Type", "application/json");
+            res.setJsonPayload({
+                success: true,
+                pharmacy: pharmacy,
+                message: "Pharmacy info fetched successfully from Supabase"
+            });
+            return res;
+        }
+
+        return createErrorResponse(404, "Pharmacy not found");
+    }
+
+    resource function put pharmacyInfo(@http:Payload json updateReq, http:Request req) returns http:Response|error {
+        string|http:HeaderNotFoundError authHeader = req.getHeader("Authorization");
+        string? pharmacyId = validateToken(authHeader is string ? authHeader : ());
+        
+        if pharmacyId is () {
+            return createErrorResponse(401, "Unauthorized access");
+        }
+
+        if updateReq is map<json> {
+            // Build update object with only provided fields
+            map<json> updateData = {};
+            
+            if updateReq.hasKey("name") {
+                updateData["name"] = updateReq["name"];
+            }
+            if updateReq.hasKey("email") {
+                updateData["email"] = updateReq["email"];
+            }
+            if updateReq.hasKey("phone") {
+                updateData["phone"] = updateReq["phone"];
+            }
+            if updateReq.hasKey("location") {
+                updateData["location"] = updateReq["location"];
+            }
+            if updateReq.hasKey("license_number") {
+                updateData["license_number"] = updateReq["license_number"];
+            }
+
+            // Update in Supabase
+            http:Response response = check supabaseClient->patch("/rest/v1/pharmacies?id=eq." + pharmacyId, updateData, {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
+            });
+
+            if response.statusCode != 200 {
+                json|error errorPayload = response.getJsonPayload();
+                string errorMsg = "Unknown error";
+                if errorPayload is json {
+                    errorMsg = errorPayload.toString();
+                }
+                log:printError("Supabase update failed: " + errorMsg);
+                return createErrorResponse(500, "Failed to update pharmacy info: " + errorMsg);
+            }
+
+            json|error updatedPharmacy = response.getJsonPayload();
+            if updatedPharmacy is error {
+                log:printError("Failed to parse updated pharmacy: " + updatedPharmacy.message());
+                return createErrorResponse(500, "Update successful but failed to retrieve updated data");
+            }
+
+            http:Response res = new;
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            res.setHeader("Content-Type", "application/json");
+            res.setJsonPayload({
+                success: true,
+                pharmacy: updatedPharmacy,
+                message: "Pharmacy info updated successfully"
+            });
+            return res;
+        }
+
+        return createErrorResponse(400, "Invalid update data");
     }
 }
 
-// ---------------- Helper Functions ----------------
-function generateId() returns string {
-    return "id_" + time:utcNow().toString();
+// UTILITY FUNCTIONS
+function validateToken(string? authHeader) returns string? {
+    if authHeader is () {
+        return ();
+    }
+    
+    if !authHeader.startsWith("Bearer ") {
+        return ();
+    }
+    
+    string token = authHeader.substring(7);
+    
+    // Extract pharmacy ID from token format: mh_PHARMACY_ID_UUID
+    if token.startsWith("mh_") {
+        string[] parts = regex:split(token, "_");
+        if parts.length() >= 3 {
+            return parts[1]; // Return the pharmacy ID part
+        }
+    }
+    
+    return ();
 }
 
-function generateJWT(string userId, string userType) returns string {
-    string header = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}";
-    string payload = "{\"sub\":\"" + userId + "\",\"type\":\"" + userType + "\",\"iat\":\"" + time:utcNow().toString() + "\"}";
-    return header + "." + payload + ".signature";
+function generateSessionToken(string pharmacyId) returns string {
+    return "mh_" + pharmacyId + "_" + uuid:createType4AsString();
 }
 
-function initializeSampleData() {
-    pharmacies.push({
-        id: "pharm_001",
-        name: "City Pharmacy",
-        email: "city@pharmacy.com",
-        password: "demo123",
-        phone: "+1234567890",
-        license: "PH123456",
-        address: "123 Main St",
-        city: "New York",
-        province: "NY",
-        country: "USA",
-        latitude: 40.7128,
-        longitude: -74.0060,
-        imageUrl: "https://example.com/pharmacy1.jpg",
-        isVerified: true
+function createErrorResponse(int statusCode, string message) returns http:Response {
+    http:Response res = new;
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Content-Type", "application/json");
+    res.statusCode = statusCode;
+    res.setJsonPayload({
+        success: false,
+        message: message,
+        timestamp: time:utcNow()
     });
-    pharmacies.push({
-        id: "pharm_002",
-        name: "Health Plus Pharmacy",
-        email: "health@pharmacy.com",
-        password: "demo123",
-        phone: "+1234567891",
-        license: "PH123457",
-        address: "456 Oak Ave",
-        city: "Los Angeles",
-        province: "CA",
-        country: "USA",
-        latitude: 34.0522,
-        longitude: -118.2437,
-        imageUrl: "https://example.com/pharmacy2.jpg",
-        isVerified: true
-    });
-    medicines.push({
-        id: "med_001",
-        name: "Paracetamol",
-        description: "Pain reliever and fever reducer",
-        category: "Pain Relief",
-        price: 5.99,
-        stockQuantity: 100,
-        pharmacyId: "pharm_001",
-        pharmacyName: "City Pharmacy",
-        location: "New York, NY",
-        imageUrl: "https://example.com/paracetamol.jpg",
-        isAvailable: true
-    });
-    medicines.push({
-        id: "med_002",
-        name: "Aspirin",
-        description: "Pain reliever and blood thinner",
-        category: "Pain Relief",
-        price: 3.99,
-        stockQuantity: 75,
-        pharmacyId: "pharm_001",
-        pharmacyName: "City Pharmacy",
-        location: "New York, NY",
-        imageUrl: "https://example.com/aspirin.jpg",
-        isAvailable: true
-    });
-    medicines.push({
-        id: "med_003",
-        name: "Ibuprofen",
-        description: "Anti-inflammatory pain reliever",
-        category: "Pain Relief",
-        price: 4.99,
-        stockQuantity: 50,
-        pharmacyId: "pharm_002",
-        pharmacyName: "Health Plus Pharmacy",
-        location: "Los Angeles, CA",
-        imageUrl: "https://example.com/ibuprofen.jpg",
-        isAvailable: true
-    });
-    users.push({
-        id: "user_001",
-        name: "John Doe",
-        email: "john@example.com",
-        password: "demo123",
-        phone: "+1234567892",
-        location: "New York, NY",
-        latitude: 40.7128,
-        longitude: -74.0060
-    });
-}
-
-public function main() {
-    initializeSampleData();
-    io:println("MediFind Backend started on port 9090");
-    io:println("Sample data loaded successfully");
+    return res;
 }

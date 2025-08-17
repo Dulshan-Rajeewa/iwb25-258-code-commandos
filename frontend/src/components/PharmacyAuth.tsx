@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { X } from "lucide-react";
 import { api } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 interface PharmacyAuthProps {
   onClose: () => void;
@@ -20,10 +21,12 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
     password: "",
     confirmPassword: "",
     phone: "",
-    license: ""
+    license: "",
+    address: ""
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const { toast } = useToast();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,13 +40,30 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
         localStorage.setItem('authToken', response.token);
         localStorage.setItem('userType', response.userType);
         localStorage.setItem('userId', response.userId);
+        
+        toast({
+          title: "Login Successful",
+          description: "Welcome back to your pharmacy dashboard!",
+        });
+        
         onLogin();
       } else {
         setError(response.message || "Login failed");
+        toast({
+          title: "Login Failed",
+          description: response.message || "Please check your credentials and try again.",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error('Login error:', error);
-      setError("Network error occurred. Please try again.");
+      const errorMessage = "Network error occurred. Please try again.";
+      setError(errorMessage);
+      toast({
+        title: "Network Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
@@ -55,7 +75,13 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
     setError("");
 
     if (registerData.password !== registerData.confirmPassword) {
-      setError("Passwords do not match");
+      const errorMessage = "Passwords do not match";
+      setError(errorMessage);
+      toast({
+        title: "Registration Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
       setIsLoading(false);
       return;
     }
@@ -66,7 +92,8 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
         email: registerData.email,
         password: registerData.password,
         phone: registerData.phone,
-        license: registerData.license
+        license: registerData.license,
+        address: registerData.address || "",
       });
       
       if (response.success) {
@@ -74,13 +101,42 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
         localStorage.setItem('authToken', response.token);
         localStorage.setItem('userType', response.userType);
         localStorage.setItem('userId', response.userId);
+        
+        toast({
+          title: "Registration Successful",
+          description: "Welcome to MediHunt! Your pharmacy has been registered successfully.",
+        });
+        
         onLogin();
       } else {
         setError(response.message || "Registration failed");
+        toast({
+          title: "Registration Failed",
+          description: response.message || "Please try again with different details.",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error('Registration error:', error);
-      setError("Network error occurred. Please try again.");
+      let errorMessage = "Network error occurred. Please try again.";
+      
+      // Handle specific error messages
+      if (error instanceof Error) {
+        if (error.message.includes('already exists')) {
+          errorMessage = "A pharmacy with this email already exists. Please use a different email or try logging in.";
+        } else if (error.message.includes('HTTP')) {
+          errorMessage = "Registration failed. Please check your details and try again.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      setError(errorMessage);
+      toast({
+        title: "Registration Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
@@ -209,6 +265,17 @@ export const PharmacyAuth = ({ onClose, onLogin }: PharmacyAuthProps) => {
                         value={registerData.license}
                         onChange={(e) => setRegisterData(prev => ({ ...prev, license: e.target.value }))}
                         required
+                        disabled={isLoading}
+                        className="h-10"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="address" className="text-sm">Address</Label>
+                      <Input
+                        id="address"
+                        placeholder="Pharmacy Address"
+                        value={registerData.address}
+                        onChange={(e) => setRegisterData(prev => ({ ...prev, address: e.target.value }))}
                         disabled={isLoading}
                         className="h-10"
                       />

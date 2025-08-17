@@ -2,20 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MapPin, Phone, Clock, Navigation, Package } from "lucide-react";
-
-interface Medicine {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  price: number;
-  stockQuantity: number;
-  pharmacyId: string;
-  pharmacyName: string;
-  location: string;
-  imageUrl: string;
-  isAvailable: boolean;
-}
+import { Medicine } from "@/lib/api";
 
 interface SearchResultsProps {
   medicine: string;
@@ -84,7 +71,7 @@ export const SearchResults = ({ medicine, location, results, isLoading }: Search
                     <div className="space-y-2">
                       <div className="flex items-center text-sm text-muted-foreground">
                         <Package className="w-4 h-4 mr-2" />
-                        <span>Category: {med.category}</span>
+                        <span>Category: {med.category || 'General'}</span>
                       </div>
                       <div className="flex items-center text-sm text-muted-foreground">
                         <MapPin className="w-4 h-4 mr-2" />

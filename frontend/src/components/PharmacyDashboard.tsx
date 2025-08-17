@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,9 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Edit, Trash2, LogOut, MapPin, Loader2, Save, X } from "lucide-react";
+import { Plus, Edit, Trash2, LogOut, MapPin, Loader2, Save, X, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 interface PharmacyDashboardProps {
   onLogout: () => void;
@@ -29,6 +31,7 @@ interface Medicine {
   location: string;
   imageUrl: string;
   isAvailable: boolean;
+  status?: string;
 }
 
 export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
@@ -40,6 +43,7 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [medicineToDelete, setMedicineToDelete] = useState<Medicine | null>(null);
+  const { toast } = useToast();
   const [newMedicine, setNewMedicine] = useState({
     name: "",
     description: "",
@@ -54,35 +58,49 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
     address: "",
     phone: "",
     email: "",
-    city: "",
-    province: "",
-    country: "",
-    imageUrl: "",
+    license_number: "",
+    profile_image: "",
     description: ""
   });
 
-  useEffect(() => {
-    loadMedicines();
-    loadPharmacyInfo();
-  }, []);
-
-  const loadMedicines = async () => {
+  const loadMedicines = useCallback(async () => {
     try {
       setIsLoading(true);
       setError("");
-      const response = await api.getMedicines();
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        setError('No authentication token found');
+        toast({
+          title: "Authentication Error",
+          description: "Please log in again to access your medicines.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const response = await api.getMedicines(token);
       if (response.medicines) {
         setMedicines(response.medicines);
+        if (response.medicines.length === 0) {
+          toast({
+            title: "No Medicines Found",
+            description: "Start by adding your first medicine to the inventory.",
+          });
+        }
       }
     } catch (error) {
       console.error('Failed to load medicines:', error);
       setError('Failed to load medicines');
+      toast({
+        title: "Failed to Load Medicines",
+        description: "Please check your connection and try again.",
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [toast]);
 
-  const loadPharmacyInfo = async () => {
+  const loadPharmacyInfo = useCallback(async () => {
     try {
       const token = localStorage.getItem('authToken');
       if (!token) return;
@@ -91,21 +109,28 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
       if (response.success && response.pharmacy) {
         setPharmacyInfo({
           name: response.pharmacy.name || "",
-          address: response.pharmacy.address || "",
+          address: response.pharmacy.location || "", // Map location to address
           phone: response.pharmacy.phone || "",
           email: response.pharmacy.email || "",
-          city: response.pharmacy.city || "",
-          province: response.pharmacy.province || "",
-          country: response.pharmacy.country || "",
-          imageUrl: response.pharmacy.imageUrl || "",
+          license_number: response.pharmacy.license_number || "",
+          profile_image: response.pharmacy.profile_image || "",
           description: response.pharmacy.description || ""
         });
       }
     } catch (error) {
       console.error('Failed to load pharmacy info:', error);
-      // Don't show error here as it's not critical
+      toast({
+        title: "Failed to Load Pharmacy Info",
+        description: "Some pharmacy information may not be available.",
+        variant: "destructive",
+      });
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    loadMedicines();
+    loadPharmacyInfo();
+  }, [loadMedicines, loadPharmacyInfo]);
 
   const handleUpdatePharmacyInfo = async () => {
     try {
@@ -129,6 +154,10 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
       
       if (response.success) {
         setSuccessMessage('Pharmacy information updated successfully!');
+        toast({
+          title: "Profile Updated",
+          description: "Your pharmacy information has been saved successfully.",
+        });
         // Update local state with response data if available
         if (response.pharmacy) {
           setPharmacyInfo({
@@ -136,31 +165,44 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
             address: response.pharmacy.address || "",
             phone: response.pharmacy.phone || "",
             email: response.pharmacy.email || "",
-            city: response.pharmacy.city || "",
-            province: response.pharmacy.province || "",
-            country: response.pharmacy.country || "",
-            imageUrl: response.pharmacy.imageUrl || "",
+            license_number: response.pharmacy.license_number || "",
+            profile_image: response.pharmacy.profile_image || "",
             description: pharmacyInfo.description || ""
           });
         }
       } else {
         setError(response.message || "Failed to update pharmacy information");
+        toast({
+          title: "Update Failed",
+          description: response.message || "Please check your information and try again.",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error('Update pharmacy info error:', error);
       setError('Failed to update pharmacy information. Please try again.');
+      toast({
+        title: "Update Error",
+        description: "Network error occurred. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
   const getStatusBadge = (medicine: Medicine) => {
-    if (medicine.stockQuantity === 0) {
+    // Use actual status from database if available, otherwise calculate from stock
+    const actualStatus = medicine.status?.toLowerCase() || 'available';
+    
+    if (actualStatus === 'out_of_stock' || actualStatus === 'unavailable' || medicine.stockQuantity === 0) {
       return <Badge variant="destructive">Out of Stock</Badge>;
-    } else if (medicine.stockQuantity < 30) {
+    } else if (actualStatus === 'low_stock' || (medicine.stockQuantity && medicine.stockQuantity < 30)) {
       return <Badge className="bg-yellow-500 text-white">Low Stock</Badge>;
-    } else {
+    } else if (actualStatus === 'available' || actualStatus === 'in_stock') {
       return <Badge className="bg-green-500 text-white">In Stock</Badge>;
+    } else {
+      return <Badge variant="secondary">{actualStatus}</Badge>;
     }
   };
 
@@ -203,6 +245,9 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
         category: newMedicine.category,
         price: price,
         stockQuantity: stockQuantity,
+        stock: stockQuantity, // Backend field
+        status: stockQuantity === 0 ? 'out_of_stock' : 
+                stockQuantity < 30 ? 'low_stock' : 'available',
         pharmacyId: "", // Will be set by backend
         pharmacyName: "", // Will be set by backend
         location: "", // Will be set by backend
@@ -213,6 +258,10 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
       
       if (response.success) {
         setSuccessMessage('Medicine added successfully!');
+        toast({
+          title: "Medicine Added",
+          description: `${newMedicine.name} has been added to your inventory.`,
+        });
         await loadMedicines();
         setNewMedicine({ 
           name: "", 
@@ -224,10 +273,21 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
         });
       } else {
         setError(response.message || "Failed to add medicine");
+        toast({
+          title: "Failed to Add Medicine",
+          description: response.message || "Please check your input and try again.",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error('Add medicine error:', error);
-      setError('Failed to add medicine. Please try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      setError(`Failed to add medicine: ${errorMessage}`);
+      toast({
+        title: "Error Adding Medicine",
+        description: `${errorMessage}. Please check if you're logged in and try again.`,
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
@@ -275,6 +335,9 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
         category: editingMedicine.category,
         price: editingMedicine.price,
         stockQuantity: editingMedicine.stockQuantity,
+        stock: editingMedicine.stockQuantity, // Backend field
+        status: editingMedicine.stockQuantity === 0 ? 'out_of_stock' : 
+                editingMedicine.stockQuantity < 30 ? 'low_stock' : 'available',
         pharmacyId: editingMedicine.pharmacyId,
         pharmacyName: editingMedicine.pharmacyName,
         location: editingMedicine.location,
@@ -367,25 +430,29 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto py-8 px-6">
+      <div className="max-w-7xl mx-auto py-4 md:py-8 px-4 md:px-6">
         {/* Alert Messages */}
         {error && (
-          <Alert className="mb-6 border-red-200 bg-red-50">
+          <Alert className="mb-4 md:mb-6 border-red-200 bg-red-50">
             <AlertDescription className="text-red-800">{error}</AlertDescription>
           </Alert>
         )}
         
         {successMessage && (
-          <Alert className="mb-6 border-green-200 bg-green-50">
+          <Alert className="mb-4 md:mb-6 border-green-200 bg-green-50">
             <AlertDescription className="text-green-800">{successMessage}</AlertDescription>
           </Alert>
         )}
 
         <Tabs defaultValue="inventory" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="inventory">Medicine Inventory</TabsTrigger>
-            <TabsTrigger value="profile">Pharmacy Profile</TabsTrigger>
-            <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3 h-auto">
+            <TabsTrigger value="inventory" className="text-xs md:text-sm py-2">
+              <span className="hidden sm:inline">Medicine </span>Inventory
+            </TabsTrigger>
+            <TabsTrigger value="profile" className="text-xs md:text-sm py-2">
+              <span className="hidden sm:inline">Pharmacy </span>Profile
+            </TabsTrigger>
+            <TabsTrigger value="analytics" className="text-xs md:text-sm py-2">Analytics</TabsTrigger>
           </TabsList>
 
           <TabsContent value="inventory" className="space-y-6">
@@ -501,10 +568,24 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
             {/* Medicine Inventory Table */}
             <Card>
               <CardHeader>
-                <CardTitle>Current Inventory</CardTitle>
-                <CardDescription>
-                  Manage your medicine stock and pricing
-                </CardDescription>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <CardTitle>Current Inventory</CardTitle>
+                    <CardDescription>
+                      Manage your medicine stock and pricing
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={loadMedicines}
+                    disabled={isLoading}
+                    className="w-full sm:w-auto"
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 {isLoading && medicines.length === 0 ? (
@@ -517,49 +598,60 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                     No medicines in inventory. Add your first medicine using the form above.
                   </div>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Medicine Name</TableHead>
-                        <TableHead>Category</TableHead>
-                        <TableHead>Price</TableHead>
-                        <TableHead>Stock</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {medicines.map((medicine) => (
-                        <TableRow key={medicine.id}>
-                          <TableCell className="font-medium">{medicine.name}</TableCell>
-                          <TableCell>{medicine.category}</TableCell>
-                          <TableCell>${medicine.price.toFixed(2)}</TableCell>
-                          <TableCell>{medicine.stockQuantity}</TableCell>
-                          <TableCell>{getStatusBadge(medicine)}</TableCell>
-                          <TableCell>
-                            <div className="flex gap-2">
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                onClick={() => handleEditMedicine(medicine)}
-                                disabled={isLoading}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button 
-                                variant="destructive" 
-                                size="sm"
-                                onClick={() => handleDeleteClick(medicine)}
-                                disabled={isLoading}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="min-w-[150px]">Medicine Name</TableHead>
+                          <TableHead className="hidden sm:table-cell">Category</TableHead>
+                          <TableHead>Price</TableHead>
+                          <TableHead>Stock</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {medicines.map((medicine) => (
+                          <TableRow key={medicine.id}>
+                            <TableCell className="font-medium">
+                              <div>
+                                <div className="font-medium">{medicine.name}</div>
+                                <div className="text-xs text-muted-foreground sm:hidden">
+                                  {medicine.category}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="hidden sm:table-cell">{medicine.category}</TableCell>
+                            <TableCell className="font-medium">${medicine.price.toFixed(2)}</TableCell>
+                            <TableCell className="font-medium">{medicine.stockQuantity || 0}</TableCell>
+                            <TableCell>{getStatusBadge(medicine)}</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex gap-2 justify-end">
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  onClick={() => handleEditMedicine(medicine)}
+                                  disabled={isLoading}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <Edit className="h-3 w-3" />
+                                </Button>
+                                <Button 
+                                  variant="destructive" 
+                                  size="sm"
+                                  onClick={() => handleDeleteClick(medicine)}
+                                  disabled={isLoading}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -572,8 +664,35 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                   <MapPin className="h-5 w-5" />
                   Pharmacy Information
                 </CardTitle>
+                <CardDescription>
+                  Update your pharmacy profile information and settings
+                </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-6">
+                {/* Profile Avatar Section */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 bg-muted/50 rounded-lg">
+                  <Avatar className="h-20 w-20 border-4 border-medical-blue/20">
+                    <AvatarImage src={pharmacyInfo.profile_image} alt={pharmacyInfo.name} />
+                    <AvatarFallback className="bg-gradient-to-br from-medical-blue to-medical-green text-white text-lg font-semibold">
+                      {pharmacyInfo.name ? pharmacyInfo.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'PH'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 space-y-2">
+                    <h3 className="text-lg font-semibold">{pharmacyInfo.name || 'Pharmacy Name'}</h3>
+                    <p className="text-sm text-muted-foreground">Upload or update your pharmacy profile image</p>
+                    <div className="space-y-2">
+                      <Label htmlFor="profile-image">Profile Image URL</Label>
+                      <Input
+                        id="profile-image"
+                        value={pharmacyInfo.profile_image}
+                        onChange={(e) => setPharmacyInfo({ ...pharmacyInfo, profile_image: e.target.value })}
+                        placeholder="https://example.com/your-pharmacy-logo.jpg"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Form Fields */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="pharmacy-name">Pharmacy Name *</Label>
@@ -607,30 +726,12 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="city">City</Label>
+                    <Label htmlFor="license">License Number</Label>
                     <Input
-                      id="city"
-                      value={pharmacyInfo.city}
-                      onChange={(e) => setPharmacyInfo({ ...pharmacyInfo, city: e.target.value })}
-                      placeholder="Enter city"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="province">Province/State</Label>
-                    <Input
-                      id="province"
-                      value={pharmacyInfo.province}
-                      onChange={(e) => setPharmacyInfo({ ...pharmacyInfo, province: e.target.value })}
-                      placeholder="Enter province or state"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="country">Country</Label>
-                    <Input
-                      id="country"
-                      value={pharmacyInfo.country}
-                      onChange={(e) => setPharmacyInfo({ ...pharmacyInfo, country: e.target.value })}
-                      placeholder="Enter country"
+                      id="license"
+                      value={pharmacyInfo.license_number}
+                      onChange={(e) => setPharmacyInfo({ ...pharmacyInfo, license_number: e.target.value })}
+                      placeholder="Enter license number"
                     />
                   </div>
                 </div>
@@ -640,17 +741,8 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                     id="address"
                     value={pharmacyInfo.address}
                     onChange={(e) => setPharmacyInfo({ ...pharmacyInfo, address: e.target.value })}
-                    placeholder="123 Main Street, Downtown"
+                    placeholder="123 Main Street, Downtown, City, State/Province, Country"
                     required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="image-url">Image URL</Label>
-                  <Input
-                    id="image-url"
-                    value={pharmacyInfo.imageUrl}
-                    onChange={(e) => setPharmacyInfo({ ...pharmacyInfo, imageUrl: e.target.value })}
-                    placeholder="https://example.com/pharmacy-image.jpg"
                   />
                 </div>
                 <div className="space-y-2">
@@ -659,7 +751,8 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                     id="description"
                     value={pharmacyInfo.description}
                     onChange={(e) => setPharmacyInfo({ ...pharmacyInfo, description: e.target.value })}
-                    placeholder="Tell customers about your pharmacy..."
+                    placeholder="Tell customers about your pharmacy, services, and specialties..."
+                    rows={4}
                   />
                 </div>
                 <Button 
@@ -684,38 +777,129 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Summary Statistics */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Total Medicines</CardTitle>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm md:text-base">Total Medicines</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold text-blue-600">
+                <CardContent className="pt-0">
+                  <div className="text-2xl md:text-3xl font-bold text-blue-600">
                     {medicines.length}
                   </div>
-                  <p className="text-muted-foreground text-sm">In your inventory</p>
+                  <p className="text-xs md:text-sm text-muted-foreground">In your inventory</p>
                 </CardContent>
               </Card>
+              
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Low Stock Items</CardTitle>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm md:text-base">Available</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold text-yellow-600">
-                    {medicines.filter(m => m.stockQuantity > 0 && m.stockQuantity < 30).length}
+                <CardContent className="pt-0">
+                  <div className="text-2xl md:text-3xl font-bold text-green-600">
+                    {medicines.filter(m => 
+                      (m.status?.toLowerCase() === 'available' || m.status?.toLowerCase() === 'in_stock') && 
+                      (m.stockQuantity || 0) > 0
+                    ).length}
                   </div>
-                  <p className="text-muted-foreground text-sm">Need restocking</p>
+                  <p className="text-xs md:text-sm text-muted-foreground">Ready to sell</p>
                 </CardContent>
               </Card>
+              
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm md:text-base">Low Stock</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="text-2xl md:text-3xl font-bold text-yellow-600">
+                    {medicines.filter(m => {
+                      const stock = m.stockQuantity || 0;
+                      const status = m.status?.toLowerCase() || 'available';
+                      return (status === 'low_stock') || (stock > 0 && stock < 30 && status === 'available');
+                    }).length}
+                  </div>
+                  <p className="text-xs md:text-sm text-muted-foreground">Need restocking</p>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm md:text-base">Out of Stock</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="text-2xl md:text-3xl font-bold text-red-600">
+                    {medicines.filter(m => 
+                      (m.stockQuantity || 0) === 0 || 
+                      m.status?.toLowerCase() === 'out_of_stock' || 
+                      m.status?.toLowerCase() === 'unavailable'
+                    ).length}
+                  </div>
+                  <p className="text-xs md:text-sm text-muted-foreground">Urgent attention</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Category Breakdown */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Category Breakdown</CardTitle>
+                <CardDescription>Medicines distribution by category</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {Object.entries(
+                    medicines.reduce((acc, medicine) => {
+                      const category = medicine.category || 'General';
+                      acc[category] = (acc[category] || 0) + 1;
+                      return acc;
+                    }, {} as Record<string, number>)
+                  ).map(([category, count]) => (
+                    <div key={category} className="text-center p-3 bg-muted/50 rounded-lg">
+                      <div className="text-lg md:text-xl font-bold text-medical-blue">{count}</div>
+                      <div className="text-xs md:text-sm text-muted-foreground truncate">{category}</div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Inventory Value */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg">Out of Stock</CardTitle>
+                  <CardTitle className="text-lg">Total Inventory Value</CardTitle>
+                  <CardDescription>Based on current stock and prices</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-3xl font-bold text-red-600">
-                    {medicines.filter(m => m.stockQuantity === 0).length}
+                  <div className="text-2xl md:text-3xl font-bold text-medical-green">
+                    ${medicines.reduce((total, medicine) => 
+                      total + ((medicine.stockQuantity || 0) * medicine.price), 0
+                    ).toFixed(2)}
                   </div>
-                  <p className="text-muted-foreground text-sm">Urgent attention</p>
+                  <p className="text-xs md:text-sm text-muted-foreground">
+                    Across {medicines.filter(m => (m.stockQuantity || 0) > 0).length} stocked items
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Average Medicine Price</CardTitle>
+                  <CardDescription>Mean price across all medicines</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl md:text-3xl font-bold text-purple-600">
+                    ${medicines.length > 0 ? 
+                      (medicines.reduce((sum, m) => sum + m.price, 0) / medicines.length).toFixed(2) : 
+                      '0.00'
+                    }
+                  </div>
+                  <p className="text-xs md:text-sm text-muted-foreground">
+                    {medicines.length > 0 ? 
+                      `Range: $${Math.min(...medicines.map(m => m.price)).toFixed(2)} - $${Math.max(...medicines.map(m => m.price)).toFixed(2)}` :
+                      'No medicines in inventory'
+                    }
+                  </p>
                 </CardContent>
               </Card>
             </div>

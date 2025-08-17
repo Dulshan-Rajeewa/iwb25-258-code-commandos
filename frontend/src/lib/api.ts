@@ -1,21 +1,70 @@
-const API_BASE_URL = 'http://localhost:9090/api/v1';
+const API_BASE_URL = 'http://localhost:9090';
 
-// Type definitions
-interface Medicine {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  price: number;
-  stockQuantity: number;
-  pharmacyId: string;
-  pharmacyName: string;
-  location: string;
-  imageUrl: string;
-  isAvailable: boolean;
+// Login interface
+export interface LoginData {
+  email: string;
+  password: string;
 }
 
-interface Pharmacy {
+// Registration interface
+export interface RegisterData {
+  name: string;
+  email: string;
+  password: string;
+  phone: string;
+  address?: string;
+  license_number?: string;
+  license?: string;
+  city?: string;
+  province?: string;
+  country?: string;
+}
+
+// Medicine interface
+export interface Medicine {
+  id: string;
+  name: string;
+  price: number;
+  description: string;
+  pharmacy_id?: string;
+  category?: string;
+  stock?: number; // Backend field
+  stockQuantity?: number; // Frontend compatibility
+  status?: string; // Backend status field
+  manufacturer?: string;
+  expiry_date?: string;
+  pharmacyId?: string;
+  pharmacyName?: string;
+  location?: string;
+  imageUrl?: string;
+  isAvailable?: boolean;
+}
+
+// Search interface
+export interface MedicineSearchResult {
+  id: string;
+  name: string;
+  price: number;
+  description: string;
+  pharmacy_name: string;
+  pharmacy_phone: string;
+  pharmacy_address: string;
+  pharmacy_id: string;
+}
+
+// Pharmacy info interface
+export interface PharmacyInfo {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  address: string;
+  license_number: string;
+  profile_image?: string;
+}
+
+// Pharmacy interface
+export interface Pharmacy {
   id: string;
   name: string;
   email: string;
@@ -31,31 +80,50 @@ interface Pharmacy {
   isVerified: boolean;
 }
 
-interface RegisterData {
-  name: string;
-  email: string;
-  password: string;
-  phone: string;
-  license?: string;
+// Pharmacy update interface
+export interface PharmacyUpdateData {
+  name?: string;
+  email?: string;
+  phone?: string;
   address?: string;
-  city?: string;
-  province?: string;
-  country?: string;
+  location?: string;
+  license_number?: string;
+  profile_image?: string;
 }
 
-interface PharmacyUpdateData {
-  name: string;
-  email: string;
-  phone: string;
-  address: string;
-  city: string;
-  province: string;
-  country: string;
-  imageUrl?: string;
+// Analytics interface
+export interface AnalyticsData {
+  totalMedicines: number;
+  lowStock?: number;
+  outOfStock?: number;
+  lowStockItems?: number;
+  outOfStockItems?: number;
+  categories?: {
+    category: string;
+    count: number;
+  }[];
+  categoryBreakdown?: { category: string; count: number; }[];
+  statusBreakdown?: { status: string; count: number; }[];
+  totalInventoryValue: number;
+  recentlyAdded?: number;
+  timestamp?: string;
+}
+
+// Medicine data interface for updates
+export interface MedicineData {
+  id?: string;
+  name?: string;
+  price?: number;
   description?: string;
+  category?: string;
+  stock?: number;
+  status?: string;
+  expiry_date?: string;
+  manufacturer?: string;
 }
 
-interface AuthResponse {
+// Auth response interface
+export interface AuthResponse {
   token: string;
   userId: string;
   userType: string;
@@ -63,12 +131,14 @@ interface AuthResponse {
   success: boolean;
 }
 
-interface SearchResponse {
+// Search response interface
+export interface SearchResponse {
   medicines: Medicine[];
   totalCount: number;
   message: string;
 }
 
+// API object
 export const api = {
   // Health check
   health: async () => {
@@ -85,7 +155,7 @@ export const api = {
   // Search medicines
   searchMedicines: async (medicineName: string, location: string): Promise<SearchResponse> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/search`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ medicineName, location })
@@ -99,11 +169,26 @@ export const api = {
   },
 
   // Get all medicines
-  getMedicines: async () => {
+  getMedicines: async (token: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/medicines`);
+      const response = await fetch(`${API_BASE_URL}/api/v1/medicines`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
+      const data = await response.json();
+      
+      // Normalize the medicines data to ensure consistent field names
+      if (data.medicines && Array.isArray(data.medicines)) {
+        data.medicines = data.medicines.map((medicine: Medicine & { stock?: number }) => ({
+          ...medicine,
+          stockQuantity: medicine.stock || medicine.stockQuantity || 0,
+          status: medicine.status || 'available',
+          category: medicine.category || 'General'
+        }));
+      }
+      
+      return data;
     } catch (error) {
       console.error('Get medicines failed:', error);
       throw error;
@@ -129,7 +214,7 @@ export const api = {
   // Pharmacy authentication
   pharmacyLogin: async (email: string, password: string): Promise<AuthResponse> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/pharmacyLogin`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/pharmacyLogin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
@@ -144,13 +229,32 @@ export const api = {
 
   pharmacyRegister: async (data: RegisterData): Promise<AuthResponse> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/pharmacyRegister`, {
+      const requestData = {
+        name: data.name,
+        email: data.email,
+        password: data.password,
+        phone: data.phone || "",
+        licenseNumber: data.license || "",
+        location: data.address || ""
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/pharmacyRegister`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
+        body: JSON.stringify(requestData)
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
+      
+      const result = await response.json();
+      
+      if (!response.ok) {
+        // Handle specific error cases
+        if (response.status === 409) {
+          throw new Error('A pharmacy with this email already exists. Please use a different email or try logging in.');
+        }
+        throw new Error(result.message || `HTTP ${response.status}`);
+      }
+      
+      return result;
     } catch (error) {
       console.error('Pharmacy registration failed:', error);
       throw error;
@@ -191,15 +295,30 @@ export const api = {
   // Medicine management (for pharmacies)
   addMedicine: async (medicine: Omit<Medicine, 'id' | 'isAvailable'>, token: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/medicines`, {
+      // Transform frontend Medicine interface to backend expected format
+      const backendMedicineData = {
+        name: medicine.name,
+        description: medicine.description,
+        category: medicine.category,
+        price: medicine.price,
+        stock: medicine.stockQuantity, // Transform stockQuantity to stock
+        status: "available"
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/medicines`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(medicine)
+        body: JSON.stringify(backendMedicineData)
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      
       return await response.json();
     } catch (error) {
       console.error('Add medicine failed:', error);
@@ -249,7 +368,7 @@ export const api = {
   // Get current pharmacy info (authenticated)
   getPharmacyInfo: async (token: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/pharmacyInfo`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/pharmacyInfo`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -264,21 +383,52 @@ export const api = {
   // Update current pharmacy info (authenticated)
   updatePharmacyInfo: async (pharmacyData: PharmacyUpdateData, token: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/pharmacyInfo`, {
+      // Transform frontend field names to backend expected format
+      const backendPharmacyData: Record<string, string> = {};
+      
+      if (pharmacyData.name) backendPharmacyData.name = pharmacyData.name;
+      if (pharmacyData.email) backendPharmacyData.email = pharmacyData.email;  
+      if (pharmacyData.phone) backendPharmacyData.phone = pharmacyData.phone;
+      if (pharmacyData.address) backendPharmacyData.location = pharmacyData.address; // Transform address to location
+      if (pharmacyData.location) backendPharmacyData.location = pharmacyData.location; // Direct location mapping
+      if (pharmacyData.license_number) backendPharmacyData.license_number = pharmacyData.license_number;
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/pharmacyInfo`, {
         method: 'PUT',
         headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify(pharmacyData)
+        body: JSON.stringify(backendPharmacyData)
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      
       return await response.json();
     } catch (error) {
       console.error('Update pharmacy info failed:', error);
       throw error;
     }
   },
+
+  // Get analytics data (authenticated)
+  getAnalytics: async (token: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/analytics`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      console.error('Get analytics failed:', error);
+      throw error;
+    }
+  },
+
 
   // Logout
   logout: (token: string) =>
