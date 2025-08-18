@@ -9,9 +9,10 @@ import { cn } from "@/lib/utils";
 
 interface SearchSectionProps {
   onSearch: (medicine: string, location: string) => void;
+  isLoading?: boolean;
 }
 
-export const SearchSection = ({ onSearch }: SearchSectionProps) => {
+export const SearchSection = ({ onSearch, isLoading = false }: SearchSectionProps) => {
   const [medicine, setMedicine] = useState("");
   const [useAutoLocation, setUseAutoLocation] = useState(true);
   const [country, setCountry] = useState("");
@@ -236,19 +237,35 @@ export const SearchSection = ({ onSearch }: SearchSectionProps) => {
                   "px-8 md:px-12 py-4 md:py-6 text-base md:text-lg font-semibold rounded-xl",
                   "shadow-glow-medical hover:shadow-glow-blue transition-all duration-300",
                   "hover:scale-105 active:scale-95",
-                  !medicine.trim() && "opacity-50 cursor-not-allowed"
+                  (!medicine.trim() || isLoading) && "opacity-50 cursor-not-allowed"
                 )}
-                disabled={!medicine.trim()}
+                disabled={!medicine.trim() || isLoading}
               >
-                <Search className="mr-2 h-5 w-5" />
-                Search Pharmacies
+                {isLoading ? (
+                  <>
+                    <div className="mr-2 h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Searching...
+                  </>
+                ) : (
+                  <>
+                    <Search className="mr-2 h-5 w-5" />
+                    Search Pharmacies
+                  </>
+                )}
               </Button>
               
-              {medicine.trim() && (
-                <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground animate-in fade-in-0 duration-500">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                  Ready to search for "{medicine}"
+              {isLoading ? (
+                <div className="flex items-center justify-center gap-2 text-sm text-medical-blue animate-in fade-in-0 duration-500">
+                  <div className="w-2 h-2 bg-medical-blue rounded-full animate-pulse" />
+                  Searching for "{medicine}" - Results will appear below...
                 </div>
+              ) : (
+                medicine.trim() && (
+                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground animate-in fade-in-0 duration-500">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                    Ready to search for "{medicine}"
+                  </div>
+                )
               )}
             </div>
           </div>

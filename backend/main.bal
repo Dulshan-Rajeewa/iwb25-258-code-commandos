@@ -102,7 +102,7 @@ service /api/v1 on httpListener {
             "name": "Demo Pharmacy",
             "email": "demo@pharmacy.com",
             "password": "demo123",
-            "location": "Colombo, Sri Lanka",
+            "address": "Colombo, Sri Lanka",
             "phone": "+94123456789",
             "license_number": "PH001"
         };
@@ -253,7 +253,7 @@ service /api/v1 on httpListener {
                 "name": pharmacyReq["name"],
                 "email": pharmacyReq["email"],
                 "password": pharmacyReq["password"],
-                "location": pharmacyReq["location"] ?: "",
+                "address": pharmacyReq["address"] ?: "",
                 "phone": pharmacyReq["phone"] ?: "",
                 "license_number": pharmacyReq["licenseNumber"] ?: ""
             };
@@ -686,8 +686,8 @@ service /api/v1 on httpListener {
             }
         }
         
-        // Search medicines in Supabase using ilike for case-insensitive partial matching
-        string searchQuery = "/rest/v1/medicines?name=ilike.*" + medicineName + "*";
+        // Search medicines in Supabase and join with pharmacy information
+        string searchQuery = "/rest/v1/medicines?name=ilike.*" + medicineName + "*&select=*,pharmacies(name,phone,email,address,license_number)";
         http:Response response = check supabaseClient->get(searchQuery, {
             "Authorization": "Bearer " + supabaseKey,
             "apikey": supabaseKey,
@@ -791,12 +791,21 @@ service /api/v1 on httpListener {
             if updateReq.hasKey("phone") {
                 updateData["phone"] = updateReq["phone"];
             }
-            if updateReq.hasKey("location") {
-                updateData["location"] = updateReq["location"];
+            // Handle address field
+            if updateReq.hasKey("address") {
+                updateData["address"] = updateReq["address"];
             }
             if updateReq.hasKey("license_number") {
                 updateData["license_number"] = updateReq["license_number"];
             }
+            if updateReq.hasKey("profile_image") {
+                updateData["profile_image"] = updateReq["profile_image"];
+            }
+            if updateReq.hasKey("description") {
+                updateData["description"] = updateReq["description"];
+            }
+
+            log:printInfo("Updating pharmacy " + pharmacyId + " with data: " + updateData.toString());
 
             // Update in Supabase
             http:Response response = check supabaseClient->patch("/rest/v1/pharmacies?id=eq." + pharmacyId, updateData, {
@@ -836,6 +845,217 @@ service /api/v1 on httpListener {
         }
 
         return createErrorResponse(400, "Invalid update data");
+    }
+
+    // PROFILE IMAGE UPLOAD ENDPOINT
+    resource function options uploadProfileImage(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    resource function post uploadProfileImage(http:Request req) returns http:Response|error {
+        string|http:HeaderNotFoundError authHeader = req.getHeader("Authorization");
+        string? pharmacyId = validateToken(authHeader is string ? authHeader : ());
+        
+        if pharmacyId is () {
+            return createErrorResponse(401, "Unauthorized access");
+        }
+
+        // Get the image data from request body
+        json|error payload = req.getJsonPayload();
+        if payload is error {
+            return createErrorResponse(400, "Invalid image data");
+        }
+
+        if payload is map<json> && payload.hasKey("profile_image") {
+            string imageUrl = payload["profile_image"].toString();
+            
+            // Update pharmacy profile_image in Supabase
+            map<json> updateData = {
+                "profile_image": imageUrl
+            };
+
+            http:Response response = check supabaseClient->patch("/rest/v1/pharmacies?id=eq." + pharmacyId, updateData, {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
+            });
+
+            if response.statusCode != 200 {
+                return createErrorResponse(500, "Failed to update profile image");
+            }
+
+            json|error updatedPharmacy = response.getJsonPayload();
+            if updatedPharmacy is error {
+                return createErrorResponse(500, "Failed to retrieve updated pharmacy data");
+            }
+
+            http:Response res = new;
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            res.setHeader("Content-Type", "application/json");
+            res.setJsonPayload({
+                success: true,
+                pharmacy: updatedPharmacy,
+                message: "Profile image updated successfully"
+            });
+            return res;
+        }
+
+        return createErrorResponse(400, "Missing profile_image in request");
+    }
+
+    // PHARMACY SETTINGS ENDPOINTS
+    resource function options pharmacySettings(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    resource function get pharmacySettings(http:Request req) returns http:Response|error {
+        string|error authHeaderResult = req.getHeader("Authorization");
+        string? authHeader = authHeaderResult is string ? authHeaderResult : ();
+        string? pharmacyId = validateToken(authHeader);
+        
+        if pharmacyId is () {
+            return createErrorResponse(401, "Invalid or missing token");
+        }
+
+        // Get pharmacy settings from Supabase
+        http:Response response = check supabaseClient->get("/rest/v1/pharmacy_settings?pharmacy_id=eq." + pharmacyId, {
+            "Authorization": "Bearer " + supabaseKey,
+            "apikey": supabaseKey
+        });
+
+        json|error payload = response.getJsonPayload();
+        if payload is error {
+            log:printError("Failed to parse settings response: " + payload.message());
+            return createErrorResponse(500, "Failed to retrieve settings");
+        }
+
+        json[] settings = <json[]>payload;
+        json defaultSettings = {
+            pharmacy_id: pharmacyId,
+            email_notifications: true,
+            sms_notifications: false,
+            opening_time: "09:00",
+            closing_time: "21:00",
+            notification_preferences: {},
+            business_hours: {}
+        };
+
+        json currentSettings = settings.length() > 0 ? settings[0] : defaultSettings;
+
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");  
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.setHeader("Content-Type", "application/json");
+        res.setJsonPayload({
+            success: true,
+            settings: currentSettings
+        });
+        return res;
+    }
+
+    resource function put pharmacySettings(@http:Payload json settingsReq, http:Request req) returns http:Response|error {
+        string|error authHeaderResult = req.getHeader("Authorization");
+        string? authHeader = authHeaderResult is string ? authHeaderResult : ();
+        string? pharmacyId = validateToken(authHeader);
+        
+        if pharmacyId is () {
+            return createErrorResponse(401, "Invalid or missing token");
+        }
+
+        if settingsReq is map<json> {
+            map<json> updateData = {};
+            updateData["pharmacy_id"] = pharmacyId;
+
+            if settingsReq.hasKey("email_notifications") {
+                updateData["email_notifications"] = settingsReq["email_notifications"];
+            }
+            if settingsReq.hasKey("sms_notifications") {
+                updateData["sms_notifications"] = settingsReq["sms_notifications"];
+            }
+            if settingsReq.hasKey("opening_time") {
+                updateData["opening_time"] = settingsReq["opening_time"];
+            }
+            if settingsReq.hasKey("closing_time") {
+                updateData["closing_time"] = settingsReq["closing_time"];
+            }
+            if settingsReq.hasKey("notification_preferences") {
+                updateData["notification_preferences"] = settingsReq["notification_preferences"];
+            }
+            if settingsReq.hasKey("business_hours") {
+                updateData["business_hours"] = settingsReq["business_hours"];
+            }
+
+            // First try to update existing settings
+            http:Response response = check supabaseClient->patch("/rest/v1/pharmacy_settings?pharmacy_id=eq." + pharmacyId, updateData, {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
+            });
+
+            // If no rows affected (404), insert new settings
+            if response.statusCode == 200 {
+                json|error updatedSettings = response.getJsonPayload();
+                if updatedSettings is json {
+                    json[] settingsArray = <json[]>updatedSettings;
+                    
+                    if settingsArray.length() == 0 {
+                        // Insert new settings
+                        updateData["id"] = uuid:createType4AsString();
+                        response = check supabaseClient->post("/rest/v1/pharmacy_settings", updateData, {
+                            "Authorization": "Bearer " + supabaseKey,
+                            "apikey": supabaseKey,
+                            "Content-Type": "application/json",
+                            "Prefer": "return=representation"
+                        });
+                    }
+                }
+            }
+
+            if response.statusCode != 200 && response.statusCode != 201 {
+                json|error errorPayload = response.getJsonPayload();
+                string errorMsg = "Unknown error";
+                if errorPayload is json {
+                    errorMsg = errorPayload.toString();
+                }
+                log:printError("Supabase settings update failed: " + errorMsg);
+                return createErrorResponse(500, "Failed to update settings: " + errorMsg);
+            }
+
+            json|error updatedSettings = response.getJsonPayload();
+            if updatedSettings is error {
+                log:printError("Failed to parse updated settings: " + updatedSettings.message());
+                return createErrorResponse(500, "Update successful but failed to retrieve updated data");
+            }
+
+            http:Response res = new;
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            res.setHeader("Content-Type", "application/json");
+            res.setJsonPayload({
+                success: true,
+                settings: updatedSettings,
+                message: "Settings updated successfully"
+            });
+            return res;
+        }
+
+        return createErrorResponse(400, "Invalid settings data");
     }
 }
 

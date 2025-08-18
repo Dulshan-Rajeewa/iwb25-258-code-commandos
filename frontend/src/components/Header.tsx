@@ -106,15 +106,17 @@ export const Header = ({ onPharmacyClick, isPharmacyLoggedIn = false, pharmacyIn
           )}
         </nav>
 
-        {/* Mobile Menu Button */}
-        <Button 
-          variant="ghost" 
-          size="sm"
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          className="md:hidden"
-        >
-          <Menu className="h-6 w-6" />
-        </Button>
+        {/* Mobile Theme Toggle and Menu Button */}
+        <div className="md:hidden flex items-center gap-2">
+          <ThemeToggle />
+          <Button 
+            variant="ghost" 
+            size="sm"
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          >
+            <Menu className="h-6 w-6" />
+          </Button>
+        </div>
       </div>
 
       {/* Mobile Navigation */}
@@ -139,10 +141,6 @@ export const Header = ({ onPharmacyClick, isPharmacyLoggedIn = false, pharmacyIn
                 About
               </Button>
             </Link>
-            <div className="flex items-center justify-between px-3 py-2">
-              <span className="text-sm text-muted-foreground">Theme</span>
-              <ThemeToggle />
-            </div>
             {isPharmacyLoggedIn && pharmacyInfo ? (
               <div className="flex flex-col gap-2 pt-2 border-t border-border">
                 <div className="flex items-center gap-3 px-3 py-2">

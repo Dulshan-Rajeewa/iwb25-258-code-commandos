@@ -11,7 +11,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Edit, Trash2, LogOut, MapPin, Loader2, Save, X, RefreshCw } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Plus, Edit, Trash2, LogOut, MapPin, Loader2, Save, X, RefreshCw, Menu, Camera, User, Settings, BarChart3, Package, Home } from "lucide-react";
+import ThemeToggle from "./ThemeToggle";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -43,6 +46,13 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [medicineToDelete, setMedicineToDelete] = useState<Medicine | null>(null);
+  const [activeView, setActiveView] = useState<'inventory' | 'profile' | 'analytics' | 'settings'>('inventory');
+  const [settings, setSettings] = useState({
+    email_notifications: true,
+    sms_notifications: false,
+    opening_time: "09:00",
+    closing_time: "21:00"
+  });
   const { toast } = useToast();
   const [newMedicine, setNewMedicine] = useState({
     name: "",
@@ -62,6 +72,19 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
     profile_image: "",
     description: ""
   });
+  
+  const [isProfileImageUploading, setIsProfileImageUploading] = useState(false);
+  const [profileImagePreview, setProfileImagePreview] = useState("");
+
+  // Get initials for avatar fallback
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
 
   const loadMedicines = useCallback(async () => {
     try {
@@ -89,10 +112,22 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
       }
     } catch (error) {
       console.error('Failed to load medicines:', error);
-      setError('Failed to load medicines');
+      
+      let errorMessage = 'Failed to load medicines. Please try again.';
+      if (error instanceof Error) {
+        if (error.message.includes('connect') || error.message.includes('fetch')) {
+          errorMessage = 'Unable to connect to server. Please check your internet connection.';
+        } else if (error.message.includes('401') || error.message.includes('unauthorized')) {
+          errorMessage = 'Your session has expired. Please log in again.';
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('userType');
+        }
+      }
+      
+      setError(errorMessage);
       toast({
         title: "Failed to Load Medicines",
-        description: "Please check your connection and try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -109,7 +144,7 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
       if (response.success && response.pharmacy) {
         setPharmacyInfo({
           name: response.pharmacy.name || "",
-          address: response.pharmacy.location || "", // Map location to address
+          address: response.pharmacy.address || "", // Only use address field
           phone: response.pharmacy.phone || "",
           email: response.pharmacy.email || "",
           license_number: response.pharmacy.license_number || "",
@@ -119,11 +154,24 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
       }
     } catch (error) {
       console.error('Failed to load pharmacy info:', error);
-      toast({
-        title: "Failed to Load Pharmacy Info",
-        description: "Some pharmacy information may not be available.",
-        variant: "destructive",
-      });
+      
+      let errorMessage = 'Some pharmacy information may not be available.';
+      if (error instanceof Error) {
+        if (error.message.includes('connect') || error.message.includes('fetch')) {
+          errorMessage = 'Unable to load pharmacy information. Please check your connection.';
+        } else if (error.message.includes('401') || error.message.includes('unauthorized')) {
+          errorMessage = 'Session expired. Please log in again to view pharmacy information.';
+        }
+      }
+      
+      // Only show toast for connection issues, not for minor info loading issues
+      if (error instanceof Error && (error.message.includes('connect') || error.message.includes('401'))) {
+        toast({
+          title: "Failed to Load Pharmacy Info",
+          description: errorMessage,
+          variant: "destructive",
+        });
+      }
     }
   }, [toast]);
 
@@ -162,32 +210,145 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
         if (response.pharmacy) {
           setPharmacyInfo({
             name: response.pharmacy.name || "",
-            address: response.pharmacy.address || "",
+            address: response.pharmacy.address || "", // Only use address field
             phone: response.pharmacy.phone || "",
             email: response.pharmacy.email || "",
             license_number: response.pharmacy.license_number || "",
             profile_image: response.pharmacy.profile_image || "",
-            description: pharmacyInfo.description || ""
+            description: response.pharmacy.description || ""
           });
         }
       } else {
-        setError(response.message || "Failed to update pharmacy information");
+        const errorMessage = response.message || "Failed to update pharmacy information";
+        setError(errorMessage);
         toast({
           title: "Update Failed",
-          description: response.message || "Please check your information and try again.",
+          description: errorMessage,
           variant: "destructive",
         });
       }
     } catch (error) {
       console.error('Update pharmacy info error:', error);
-      setError('Failed to update pharmacy information. Please try again.');
+      
+      // Extract meaningful error message
+      let errorMessage = 'An unexpected error occurred while updating pharmacy information.';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('connect') || error.message.includes('fetch')) {
+          errorMessage = 'Unable to connect to server. Please check your internet connection and try again.';
+        } else if (error.message.includes('session') || error.message.includes('expired')) {
+          errorMessage = 'Your session has expired. Please log in again.';
+          // Optionally redirect to login
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('userType');
+        } else if (error.message.includes('permission')) {
+          errorMessage = 'You do not have permission to perform this action.';
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+      }
+      
+      setError(errorMessage);
       toast({
         title: "Update Error",
-        description: "Network error occurred. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleProfileImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsProfileImageUploading(true);
+
+      // Basic validation
+      if (!file.type.startsWith('image/')) {
+        toast({
+          title: "Invalid File",
+          description: "Please select a valid image file.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        toast({
+          title: "File Too Large",
+          description: "Please select an image smaller than 5MB.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Convert to base64 for demo purposes
+      // In production, you'd upload to a proper image hosting service
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const imageUrl = e.target?.result as string;
+        setProfileImagePreview(imageUrl);
+        
+        try {
+          const token = localStorage.getItem('authToken');
+          if (!token) throw new Error('No authentication token');
+
+          // Upload the profile image
+          const response = await api.uploadProfileImage(imageUrl, token);
+          
+          if (response.success) {
+            setPharmacyInfo(prev => ({ ...prev, profile_image: imageUrl }));
+            toast({
+              title: "Success",
+              description: "Profile image updated successfully!",
+            });
+          } else {
+            throw new Error(response.message || 'Upload failed');
+          }
+        } catch (error) {
+          console.error('Profile image upload error:', error);
+          
+          // Extract meaningful error message for image upload
+          let errorMessage = 'Failed to upload profile image. Please try again.';
+          
+          if (error instanceof Error) {
+            if (error.message.includes('connect') || error.message.includes('fetch')) {
+              errorMessage = 'Unable to connect to server. Please check your internet connection.';
+            } else if (error.message.includes('session') || error.message.includes('expired')) {
+              errorMessage = 'Your session has expired. Please log in again.';
+              localStorage.removeItem('authToken');
+              localStorage.removeItem('userType');
+            } else if (error.message.includes('large') || error.message.includes('size')) {
+              errorMessage = 'Image file is too large. Please select a smaller image.';
+            } else if (error.message.includes('format') || error.message.includes('type')) {
+              errorMessage = 'Unsupported image format. Please use JPG, PNG, or GIF.';
+            } else if (error.message) {
+              errorMessage = error.message;
+            }
+          }
+          
+          toast({
+            title: "Upload Failed",
+            description: errorMessage,
+            variant: "destructive",
+          });
+          setProfileImagePreview("");
+        } finally {
+          setIsProfileImageUploading(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('Image processing error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to process the image. Please try again.",
+        variant: "destructive",
+      });
+      setIsProfileImageUploading(false);
     }
   };
 
@@ -400,6 +561,64 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
     }
   };
 
+  // Settings functions
+  const loadPharmacySettings = async () => {
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) return;
+
+      const response = await api.getPharmacySettings(token);
+      if (response.success && response.settings) {
+        setSettings({
+          email_notifications: response.settings.email_notifications,
+          sms_notifications: response.settings.sms_notifications,
+          opening_time: response.settings.opening_time,
+          closing_time: response.settings.closing_time
+        });
+      }
+    } catch (error) {
+      console.error('Load settings error:', error);
+    }
+  };
+
+  const handleUpdateSettings = async () => {
+    setIsLoading(true);
+    setError("");
+    setSuccessMessage("");
+
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        setError('Authentication required. Please log in again.');
+        return;
+      }
+
+      const response = await api.updatePharmacySettings(token, settings);
+      
+      if (response.success) {
+        setSuccessMessage('Settings updated successfully!');
+        toast({
+          title: "Settings Updated",
+          description: "Your pharmacy settings have been saved successfully.",
+        });
+      } else {
+        setError(response.message || "Failed to update settings");
+      }
+    } catch (error) {
+      console.error('Update settings error:', error);
+      setError('Failed to update settings. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load settings when switching to settings view
+  useEffect(() => {
+    if (activeView === 'settings') {
+      loadPharmacySettings();
+    }
+  }, [activeView]);
+
   // Clear messages after a few seconds
   useEffect(() => {
     if (successMessage) {
@@ -417,16 +636,191 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="bg-card border-b border-border py-4 px-6">
+      {/* Enhanced Header with Profile Avatar and Hamburger Menu */}
+      <header className="bg-card/95 backdrop-blur-md border-b border-border/50 py-3 px-4 md:px-6 sticky top-0 z-50 shadow-sm">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">
-            Pharmacy Dashboard
-          </h1>
-          <Button variant="outline" onClick={onLogout}>
-            <LogOut className="h-4 w-4 mr-2" />
-            Logout
-          </Button>
+          {/* Left: Logo and Title */}
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-medical-blue to-medical-green bg-clip-text text-transparent">
+              Pharmacy Dashboard
+            </h1>
+          </div>
+
+          {/* Center: Navigation (Desktop) */}
+          <nav className="hidden md:flex items-center gap-2">
+            <Button 
+              variant={activeView === 'inventory' ? 'default' : 'ghost'} 
+              size="sm" 
+              className={activeView === 'inventory' ? 'bg-medical-blue hover:bg-medical-blue/90' : 'text-muted-foreground hover:text-medical-blue'}
+              onClick={() => setActiveView('inventory')}
+            >
+              <Package className="h-4 w-4 mr-2" />
+              Inventory
+            </Button>
+            <Button 
+              variant={activeView === 'profile' ? 'default' : 'ghost'} 
+              size="sm" 
+              className={activeView === 'profile' ? 'bg-medical-green hover:bg-medical-green/90' : 'text-muted-foreground hover:text-medical-green'}
+              onClick={() => setActiveView('profile')}
+            >
+              <User className="h-4 w-4 mr-2" />
+              Profile
+            </Button>
+            <Button 
+              variant={activeView === 'analytics' ? 'default' : 'ghost'} 
+              size="sm" 
+              className={activeView === 'analytics' ? 'bg-accent hover:bg-accent/90' : 'text-muted-foreground hover:text-accent'}
+              onClick={() => setActiveView('analytics')}
+            >
+              <BarChart3 className="h-4 w-4 mr-2" />
+              Analytics
+            </Button>
+            <Button 
+              variant={activeView === 'settings' ? 'default' : 'ghost'} 
+              size="sm" 
+              className={activeView === 'settings' ? 'bg-secondary hover:bg-secondary/90' : 'text-muted-foreground hover:text-secondary'}
+              onClick={() => setActiveView('settings')}
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              Settings
+            </Button>
+          </nav>
+
+          {/* Right: Profile Avatar, Theme Toggle, and Actions */}
+          <div className="flex items-center gap-2 md:gap-3">
+            {/* Theme Toggle */}
+            <ThemeToggle />
+
+            {/* Profile Avatar with Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-9 w-9 rounded-full border-2 border-medical-blue/20 hover:border-medical-blue/40 transition-all duration-300">
+                  <Avatar className="h-8 w-8">
+                    <AvatarImage 
+                      src={profileImagePreview || pharmacyInfo.profile_image} 
+                      alt={pharmacyInfo.name}
+                      className="object-cover"
+                    />
+                    <AvatarFallback className="bg-gradient-to-br from-medical-blue to-medical-green text-white text-xs font-semibold">
+                      {getInitials(pharmacyInfo.name || "PH")}
+                    </AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56 bg-card/95 backdrop-blur-md border-border/50" align="end" forceMount>
+                <div className="flex flex-col space-y-1 p-3">
+                  <p className="text-sm font-medium leading-none">{pharmacyInfo.name || "Pharmacy Name"}</p>
+                  <p className="text-xs leading-none text-muted-foreground">
+                    {pharmacyInfo.email || "email@pharmacy.com"}
+                  </p>
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => setActiveView('profile')}
+                >
+                  <User className="mr-2 h-4 w-4" />
+                  <span>Profile Settings</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => setActiveView('settings')}
+                >
+                  <Settings className="mr-2 h-4 w-4" />
+                  <span>Dashboard Settings</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={onLogout}
+                  className="text-red-600 hover:text-red-700 hover:bg-red-50 cursor-pointer"
+                >
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Log out</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Mobile Hamburger Menu */}
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="sm" className="md:hidden">
+                  <Menu className="h-5 w-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-[300px] bg-card/95 backdrop-blur-md">
+                <SheetHeader>
+                  <SheetTitle className="flex items-center gap-3">
+                    <Avatar className="h-10 w-10">
+                      <AvatarImage 
+                        src={profileImagePreview || pharmacyInfo.profile_image} 
+                        alt={pharmacyInfo.name}
+                        className="object-cover"
+                      />
+                      <AvatarFallback className="bg-gradient-to-br from-medical-blue to-medical-green text-white">
+                        {getInitials(pharmacyInfo.name || "PH")}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="text-left">
+                      <p className="text-sm font-medium">{pharmacyInfo.name || "Pharmacy Name"}</p>
+                      <p className="text-xs text-muted-foreground">{pharmacyInfo.email}</p>
+                    </div>
+                  </SheetTitle>
+                  <SheetDescription>
+                    Manage your pharmacy dashboard and settings
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="flex flex-col gap-2 mt-6">
+                  <Button 
+                    variant={activeView === 'inventory' ? 'default' : 'ghost'} 
+                    className="justify-start" 
+                    size="lg"
+                    onClick={() => setActiveView('inventory')}
+                  >
+                    <Package className="mr-3 h-5 w-5" />
+                    Medicine Inventory
+                  </Button>
+                  <Button 
+                    variant={activeView === 'profile' ? 'default' : 'ghost'} 
+                    className="justify-start" 
+                    size="lg"
+                    onClick={() => setActiveView('profile')}
+                  >
+                    <User className="mr-3 h-5 w-5" />
+                    Pharmacy Profile
+                  </Button>
+                  <Button 
+                    variant={activeView === 'analytics' ? 'default' : 'ghost'} 
+                    className="justify-start" 
+                    size="lg"
+                    onClick={() => setActiveView('analytics')}
+                  >
+                    <BarChart3 className="mr-3 h-5 w-5" />
+                    Analytics & Reports
+                  </Button>
+                  <Button 
+                    variant={activeView === 'settings' ? 'default' : 'ghost'} 
+                    className="justify-start" 
+                    size="lg"
+                    onClick={() => setActiveView('settings')}
+                  >
+                    <Settings className="mr-3 h-5 w-5" />
+                    Settings
+                  </Button>
+                  <div className="border-t pt-4 mt-4">
+                    <Button 
+                      variant="ghost" 
+                      className="justify-start text-red-600 hover:text-red-700 hover:bg-red-50" 
+                      size="lg"
+                      onClick={onLogout}
+                    >
+                      <LogOut className="mr-3 h-5 w-5" />
+                      Log out
+                    </Button>
+                  </div>
+                </div>
+              </SheetContent>
+            </Sheet>
+          </div>
         </div>
       </header>
 
@@ -444,18 +838,9 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
           </Alert>
         )}
 
-        <Tabs defaultValue="inventory" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 h-auto">
-            <TabsTrigger value="inventory" className="text-xs md:text-sm py-2">
-              <span className="hidden sm:inline">Medicine </span>Inventory
-            </TabsTrigger>
-            <TabsTrigger value="profile" className="text-xs md:text-sm py-2">
-              <span className="hidden sm:inline">Pharmacy </span>Profile
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="text-xs md:text-sm py-2">Analytics</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="inventory" className="space-y-6">
+        {/* Conditional Content Based on Active View */}
+        {activeView === 'inventory' && (
+          <div className="space-y-6">
             {/* Add Medicine Form */}
             <Card>
               <CardHeader>
@@ -655,9 +1040,11 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>
+        )}
 
-          <TabsContent value="profile" className="space-y-6">
+        {activeView === 'profile' && (
+          <div className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -669,25 +1056,85 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Profile Avatar Section */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 bg-muted/50 rounded-lg">
-                  <Avatar className="h-20 w-20 border-4 border-medical-blue/20">
-                    <AvatarImage src={pharmacyInfo.profile_image} alt={pharmacyInfo.name} />
-                    <AvatarFallback className="bg-gradient-to-br from-medical-blue to-medical-green text-white text-lg font-semibold">
-                      {pharmacyInfo.name ? pharmacyInfo.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'PH'}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 space-y-2">
-                    <h3 className="text-lg font-semibold">{pharmacyInfo.name || 'Pharmacy Name'}</h3>
-                    <p className="text-sm text-muted-foreground">Upload or update your pharmacy profile image</p>
-                    <div className="space-y-2">
-                      <Label htmlFor="profile-image">Profile Image URL</Label>
-                      <Input
-                        id="profile-image"
-                        value={pharmacyInfo.profile_image}
-                        onChange={(e) => setPharmacyInfo({ ...pharmacyInfo, profile_image: e.target.value })}
-                        placeholder="https://example.com/your-pharmacy-logo.jpg"
+                {/* Enhanced Profile Avatar Section */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 p-6 bg-gradient-to-r from-medical-blue/10 to-medical-green/10 rounded-xl border border-border/50">
+                  <div className="relative group">
+                    <Avatar className="h-24 w-24 border-4 border-medical-blue/20 group-hover:border-medical-blue/40 transition-all duration-300">
+                      <AvatarImage 
+                        src={profileImagePreview || pharmacyInfo.profile_image} 
+                        alt={pharmacyInfo.name}
+                        className="object-cover"
                       />
+                      <AvatarFallback className="bg-gradient-to-br from-medical-blue to-medical-green text-white text-xl font-semibold">
+                        {getInitials(pharmacyInfo.name || "PH")}
+                      </AvatarFallback>
+                    </Avatar>
+                    
+                    {/* Upload Button Overlay */}
+                    <div className="absolute inset-0 bg-black/60 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center cursor-pointer">
+                      <label htmlFor="profile-image-upload" className="cursor-pointer">
+                        <Camera className="h-6 w-6 text-white" />
+                        <input
+                          id="profile-image-upload"
+                          type="file"
+                          accept="image/*"
+                          onChange={handleProfileImageUpload}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    {isProfileImageUploading && (
+                      <div className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center">
+                        <Loader2 className="h-6 w-6 text-white animate-spin" />
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="flex-1 space-y-3">
+                    <h3 className="text-xl font-semibold bg-gradient-to-r from-medical-blue to-medical-green bg-clip-text text-transparent">
+                      {pharmacyInfo.name || 'Pharmacy Name'}
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                      Click on the avatar to upload a new profile image. Supported formats: JPG, PNG, GIF (max 5MB)
+                    </p>
+                    
+                    {/* Upload Methods */}
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="hover:bg-medical-blue/10 hover:border-medical-blue/30"
+                        onClick={() => document.getElementById('profile-image-upload')?.click()}
+                        disabled={isProfileImageUploading}
+                      >
+                        <Camera className="h-4 w-4 mr-2" />
+                        {isProfileImageUploading ? 'Uploading...' : 'Upload Image'}
+                      </Button>
+                      
+                      <div className="flex-1 space-y-1">
+                        <Label htmlFor="profile-image-url" className="text-xs">Or enter image URL</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="profile-image-url"
+                            value={pharmacyInfo.profile_image}
+                            onChange={(e) => setPharmacyInfo({ ...pharmacyInfo, profile_image: e.target.value })}
+                            placeholder="https://example.com/logo.jpg"
+                            className="text-xs"
+                          />
+                          {pharmacyInfo.profile_image && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setPharmacyInfo({ ...pharmacyInfo, profile_image: "" })}
+                              className="px-2"
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -774,9 +1221,11 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                 </Button>
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>
+        )}
 
-          <TabsContent value="analytics" className="space-y-6">
+        {activeView === 'analytics' && (
+          <div className="space-y-6">
             {/* Summary Statistics */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <Card>
@@ -903,8 +1352,107 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                 </CardContent>
               </Card>
             </div>
-          </TabsContent>
-        </Tabs>
+          </div>
+        )}
+
+        {activeView === 'settings' && (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Settings className="h-5 w-5" />
+                  Settings
+                </CardTitle>
+                <CardDescription>
+                  Manage your pharmacy settings and preferences
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Notification Preferences</h3>
+                    <div className="space-y-3">
+                      <div className="flex items-center space-x-2">
+                        <input 
+                          type="checkbox" 
+                          id="email-notifications" 
+                          className="rounded h-4 w-4" 
+                          checked={settings.email_notifications}
+                          onChange={(e) => setSettings({...settings, email_notifications: e.target.checked})}
+                        />
+                        <Label htmlFor="email-notifications" className="text-sm font-medium">
+                          Email notifications
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <input 
+                          type="checkbox" 
+                          id="sms-notifications" 
+                          className="rounded h-4 w-4" 
+                          checked={settings.sms_notifications}
+                          onChange={(e) => setSettings({...settings, sms_notifications: e.target.checked})}
+                        />
+                        <Label htmlFor="sms-notifications" className="text-sm font-medium">
+                          SMS notifications
+                        </Label>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Business Hours</h3>
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="opening-time" className="text-sm font-medium">Opening Time</Label>
+                        <Input 
+                          id="opening-time"
+                          type="time" 
+                          value={settings.opening_time}
+                          onChange={(e) => setSettings({...settings, opening_time: e.target.value})}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="closing-time" className="text-sm font-medium">Closing Time</Label>
+                        <Input 
+                          id="closing-time"
+                          type="time" 
+                          value={settings.closing_time}
+                          onChange={(e) => setSettings({...settings, closing_time: e.target.value})}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-6 pt-6 border-t flex gap-3">
+                  <Button 
+                    onClick={handleUpdateSettings}
+                    disabled={isLoading}
+                    className="bg-medical-blue hover:bg-medical-blue/90"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        Save Settings
+                      </>
+                    )}
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    onClick={loadPharmacySettings}
+                    disabled={isLoading}
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Reset
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
       </div>
 
       {/* Edit Medicine Dialog */}
