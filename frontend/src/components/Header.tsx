@@ -28,60 +28,66 @@ export const Header = ({ onPharmacyClick, isPharmacyLoggedIn = false, pharmacyIn
   };
 
   return (
-    <header className="w-full bg-card/80 backdrop-blur-sm border-b border-border py-4 px-4 sm:px-6 transition-all duration-300 sticky top-0 z-50">
+    <header className="w-full bg-card/95 backdrop-blur-md border-b border-border/50 py-4 px-4 sm:px-6 transition-all duration-300 sticky top-0 z-50 shadow-sm">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2 sm:gap-3 group">
-          <img 
-            src={logo} 
-            alt="MediHunt Logo" 
-            className="h-8 w-8 sm:h-10 sm:w-10 transition-transform duration-300 group-hover:scale-110" 
-          />
-          <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-medical-blue to-medical-green bg-clip-text text-transparent">
+          <div className="relative">
+            <img 
+              src={logo} 
+              alt="MediHunt Logo" 
+              className="h-8 w-8 sm:h-10 sm:w-10 transition-all duration-300 group-hover:scale-110 group-hover:rotate-3" 
+            />
+            <div className="absolute inset-0 bg-medical-blue/20 rounded-full scale-0 group-hover:scale-125 transition-transform duration-300 -z-10" />
+          </div>
+          <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-medical-blue via-medical-green to-accent bg-clip-text text-transparent group-hover:from-accent group-hover:to-medical-blue transition-all duration-500">
             MediHunt
           </h1>
         </Link>
         
         {/* Desktop Navigation */}
-        <nav className="hidden md:flex items-center gap-4">
+        <nav className="hidden md:flex items-center gap-6">
           <Link to="/how-it-works">
             <Button 
               variant="ghost" 
-              className="text-muted-foreground hover:text-foreground transition-colors duration-300"
+              className="text-muted-foreground hover:text-medical-blue hover:bg-medical-blue/10 transition-all duration-300 relative group"
             >
-              How it works
+              <span className="relative z-10">How it works</span>
+              <div className="absolute inset-0 bg-gradient-to-r from-medical-blue/0 via-medical-blue/10 to-medical-blue/0 scale-x-0 group-hover:scale-x-100 transition-transform duration-300 rounded-md" />
             </Button>
           </Link>
           <Link to="/about">
             <Button 
               variant="ghost"
-              className="text-muted-foreground hover:text-foreground transition-colors duration-300"
+              className="text-muted-foreground hover:text-medical-green hover:bg-medical-green/10 transition-all duration-300 relative group"
             >
-              About
+              <span className="relative z-10">About</span>
+              <div className="absolute inset-0 bg-gradient-to-r from-medical-green/0 via-medical-green/10 to-medical-green/0 scale-x-0 group-hover:scale-x-100 transition-transform duration-300 rounded-md" />
             </Button>
           </Link>
           <ThemeToggle />
           {isPharmacyLoggedIn && pharmacyInfo ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-                  <Avatar className="h-9 w-9 border-2 border-medical-blue/20 hover:border-medical-blue/40 transition-colors">
+                <Button variant="ghost" className="relative h-10 w-10 rounded-full group">
+                  <Avatar className="h-9 w-9 border-2 border-medical-blue/20 group-hover:border-medical-blue/40 transition-all duration-300 group-hover:scale-110">
                     <AvatarImage src={pharmacyInfo.profile_image} alt={pharmacyInfo.name} />
-                    <AvatarFallback className="bg-gradient-to-br from-medical-blue to-medical-green text-white font-semibold">
+                    <AvatarFallback className="bg-gradient-to-br from-medical-blue to-medical-green text-white font-semibold text-sm group-hover:from-medical-green group-hover:to-medical-blue transition-all duration-500">
                       {getInitials(pharmacyInfo.name)}
                     </AvatarFallback>
                   </Avatar>
+                  <div className="absolute inset-0 rounded-full bg-medical-blue/20 scale-0 group-hover:scale-125 transition-transform duration-300 -z-10" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-56" align="end" forceMount>
+              <DropdownMenuContent className="w-56 bg-card/95 backdrop-blur-md border-border/50" align="end" forceMount>
                 <div className="flex flex-col space-y-1 p-2">
-                  <p className="text-sm font-medium leading-none">{pharmacyInfo.name}</p>
+                  <p className="text-sm font-medium leading-none text-foreground">{pharmacyInfo.name}</p>
                   <p className="text-xs leading-none text-muted-foreground">
                     Pharmacy Dashboard
                   </p>
                 </div>
                 <DropdownMenuItem 
                   onClick={onPharmacyLogout}
-                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                  className="text-red-600 hover:text-red-700 hover:bg-red-50 transition-colors duration-200 cursor-pointer"
                 >
                   <LogOut className="mr-2 h-4 w-4" />
                   <span>Log out</span>
@@ -92,9 +98,10 @@ export const Header = ({ onPharmacyClick, isPharmacyLoggedIn = false, pharmacyIn
             <Button 
               variant="medical" 
               onClick={onPharmacyClick}
-              className="shadow-glow-blue hover:shadow-glow-medical transition-all duration-300"
+              className="shadow-glow-medical hover:shadow-glow-blue transition-all duration-300 hover:scale-105 active:scale-95 relative group overflow-hidden"
             >
-              Pharmacy Login
+              <span className="relative z-10">Pharmacy Login</span>
+              <div className="absolute inset-0 bg-gradient-to-r from-medical-blue/20 to-medical-green/20 translate-x-[-100%] group-hover:translate-x-0 transition-transform duration-500" />
             </Button>
           )}
         </nav>
