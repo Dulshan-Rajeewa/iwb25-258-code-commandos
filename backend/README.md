@@ -1,6 +1,6 @@
-# MediFind Backend
+# MediHunt Backend
 
-A Ballerina-based backend API for the MediFind medicine finder application.
+A Ballerina-based backend API for the MediHunt medicine finder application.
 
 ## Features
 
