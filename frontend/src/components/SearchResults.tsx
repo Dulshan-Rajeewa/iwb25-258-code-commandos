@@ -18,16 +18,17 @@ interface SearchResultsProps {
 
 export const SearchResults = ({ medicine, location, results, isLoading }: SearchResultsProps) => {
   const [callDialogOpen, setCallDialogOpen] = useState(false);
-  const [selectedPharmacy, setSelectedPharmacy] = useState<Medicine['pharmacies'] | null>(null);
+  const [selectedPharmacy, setSelectedPharmacy] = useState<NonNullable<Medicine['pharmacies']>[0] | null>(null);
   const { toast } = useToast();
 
   // Debug logging
   console.log('SearchResults props:', { medicine, location, results, isLoading });
   results.forEach((result, index) => {
     console.log(`Result ${index}:`, result);
+    console.log(`Result ${index} pharmacies:`, result.pharmacies);
   });
 
-  const openMapDirections = (pharmacy: Medicine['pharmacies']) => {
+  const openMapDirections = (pharmacy: NonNullable<Medicine['pharmacies']>[0]) => {
     console.log('Opening map for pharmacy:', pharmacy);
     if (pharmacy?.address && pharmacy?.name) {
       const query = encodeURIComponent(`${pharmacy.name}, ${pharmacy.address}`);
@@ -44,8 +45,9 @@ export const SearchResults = ({ medicine, location, results, isLoading }: Search
     }
   };
 
-  const handleCallPharmacy = (pharmacy: Medicine['pharmacies']) => {
+  const handleCallPharmacy = (pharmacy: NonNullable<Medicine['pharmacies']>[0]) => {
     console.log('Attempting to call pharmacy:', pharmacy);
+    if (!pharmacy) return;
     setSelectedPharmacy(pharmacy);
     setCallDialogOpen(true);
   };
@@ -197,14 +199,16 @@ export const SearchResults = ({ medicine, location, results, isLoading }: Search
                 const availability = getAvailabilityInfo(stockValue);
                 const AvailabilityIcon = availability.icon;
                 
-                // Ensure pharmacy data exists for testing
-                const pharmacyData = result.pharmacies || {
-                  name: result.pharmacyName || "Demo Pharmacy",
-                  phone: "+94123456789",
-                  email: "demo@pharmacy.com", 
-                  address: "123 Main Street, Colombo, Sri Lanka", // Changed from location to address
-                  license_number: "PH001"
-                };
+                // Ensure pharmacy data exists - take first pharmacy from array
+                const pharmacyData = (result.pharmacies && result.pharmacies.length > 0) 
+                  ? result.pharmacies[0] 
+                  : {
+                    name: result.pharmacyName || "Demo Pharmacy",
+                    phone: "+94123456789",
+                    email: "demo@pharmacy.com", 
+                    address: "123 Main Street, Colombo, Sri Lanka",
+                    license_number: "PH001"
+                  };
                 
                 return (
                   <Card

@@ -44,7 +44,7 @@ export interface Medicine {
     email: string;
     address: string; // Changed from location to address
     license_number: string;
-  };
+  }[];  // Changed to array to match Supabase response format
 }
 
 // Search interface
@@ -117,6 +117,30 @@ export interface SettingsUpdateData {
   closing_time?: string;
   notification_preferences?: Record<string, boolean>;
   business_hours?: Record<string, string>;
+}
+
+// Location interfaces
+export interface Country {
+  country: string;
+}
+
+export interface State {
+  name: string;
+}
+
+export interface City {
+  name: string;
+}
+
+// City is returned as string from CountriesNow API
+export type CityName = string;
+
+export interface LocationSearchParams {
+  medicineName: string;
+  location?: string;
+  country?: string;
+  state?: string;
+  city?: string;
 }
 
 // Analytics interface
@@ -610,5 +634,77 @@ export const api = {
     fetch(`${API_BASE_URL}/logout`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` }
-    }).then(res => res.json())
+    }).then(res => res.json()),
+
+  // Location API functions
+  getCountries: async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/countries`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      console.error('Get countries failed:', error);
+      throw error;
+    }
+  },
+
+  getStates: async (country: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/countries/states`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ country })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      console.error('Get states failed:', error);
+      throw error;
+    }
+  },
+
+  getCities: async (country: string, state: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/countries/cities`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ country, state })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      console.error('Get cities failed:', error);
+      throw error;
+    }
+  },
+
+  searchMedicinesWithLocation: async (searchParams: LocationSearchParams) => {
+    try {
+      console.log('🚀 Making location-based API call');
+      console.log('📡 API URL:', `${API_BASE_URL}/search/location`);
+      console.log('📦 Request payload:', JSON.stringify(searchParams, null, 2));
+      
+      const response = await fetch(`${API_BASE_URL}/search/location`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(searchParams)
+      });
+      
+      console.log('📊 Response status:', response.status);
+      console.log('📊 Response ok:', response.ok);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Response error:', errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      
+      const result = await response.json();
+      console.log('✅ API Response:', result);
+      return result;
+    } catch (error) {
+      console.error('💥 Location-based search failed:', error);
+      throw error;
+    }
+  }
 }; 

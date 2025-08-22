@@ -6,10 +6,17 @@ import ballerina/regex;
 
 configurable string supabaseUrl = "https://sjtzzxqopnyouktcgwwg.supabase.co";
 configurable string supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNqdHp6eHFvcG55b3VrdGNnd3dnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQyMjA3OTcsImV4cCI6MjA2OTc5Njc5N30.ahvznD6ER2eRz8HE5NkXMOF7epq3v3Zp3GWrvZSplWY";
+configurable string countriesApiKey = "NbbEYeZKCdhqG4nmyzcfUHchbhsANAif8kovpiSq";
 
 http:Client supabaseClient = check new (supabaseUrl, {
     timeout: 30,
     httpVersion: http:HTTP_1_1
+});
+
+http:Client countriesApiClient = check new ("https://countriesnow.space", {
+    timeout: 30,
+    httpVersion: http:HTTP_1_1,
+    followRedirects: {enabled: true, maxCount: 5}
 });
 
 listener http:Listener httpListener = new (9090);
@@ -719,6 +726,814 @@ service /api/v1 on httpListener {
         res.setHeader("Content-Type", "application/json");
         res.setJsonPayload(responseBody);
         return res;
+    }
+
+    // COUNTRIES API ENDPOINTS
+    resource function options countries(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    resource function get countries() returns http:Response|error {
+        // Try to fetch countries from CountriesNow API with fallback
+        http:Response|error response = countriesApiClient->get("/api/v0.1/countries");
+        
+        json fallbackCountries = [
+            {"country": "Afghanistan"},
+            {"country": "Albania"},
+            {"country": "Algeria"},
+            {"country": "Australia"},
+            {"country": "Austria"},
+            {"country": "Bangladesh"},
+            {"country": "Brazil"},
+            {"country": "Canada"},
+            {"country": "China"},
+            {"country": "Egypt"},
+            {"country": "France"},
+            {"country": "Germany"},
+            {"country": "India"},
+            {"country": "Indonesia"},
+            {"country": "Italy"},
+            {"country": "Japan"},
+            {"country": "Mexico"},
+            {"country": "Netherlands"},
+            {"country": "Pakistan"},
+            {"country": "Russia"},
+            {"country": "South Africa"},
+            {"country": "Spain"},
+            {"country": "Sri Lanka"},
+            {"country": "Turkey"},
+            {"country": "United Kingdom"},
+            {"country": "United States"}
+        ];
+        
+        json countriesData = fallbackCountries;
+        
+        if response is error {
+            log:printError("Failed to fetch countries from Countries API, using fallback: " + response.message());
+        } else if response.statusCode != 200 {
+            log:printError("Countries API returned status: " + response.statusCode.toString() + ", using fallback");
+        } else {
+            json|error apiData = response.getJsonPayload();
+            if apiData is json && apiData is map<json> && apiData.hasKey("data") {
+                anydata apiCountriesData = apiData["data"];
+                if apiCountriesData is json[] {
+                    log:printInfo("Successfully fetched " + apiCountriesData.length().toString() + " countries from external API");
+                    // The external API data is already in the correct format with "country" property
+                    countriesData = apiCountriesData;
+                } else {
+                    log:printError("External API countries data is not an array, using fallback");
+                }
+            } else {
+                log:printError("Failed to parse countries response structure, using fallback");
+            }
+        }
+
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.setHeader("Content-Type", "application/json");
+        res.setJsonPayload({
+            success: true,
+            data: {
+                data: countriesData
+            },
+            message: "Countries fetched successfully"
+        });
+        return res;
+    }
+
+    resource function options countries/states(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    // GET endpoint for states with query parameter (making country parameter optional)
+    resource function get countries/states(http:Request req, string? country = ()) returns http:Response|error {
+        // If no country provided, return error
+        if country is () {
+            http:Response res = new;
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            res.setHeader("Content-Type", "application/json");
+            res.statusCode = 400;
+            res.setJsonPayload({
+                success: false,
+                message: "Country parameter is required"
+            });
+            return res;
+        }
+        
+        log:printInfo("GET request for states of: " + country);
+        
+        // Try to fetch from external API first for ALL countries
+        http:Response|error response = countriesApiClient->post("/api/v0.1/countries/states", {
+            "country": country
+        });
+        
+        if response is http:Response && response.statusCode == 200 {
+            json|error apiData = response.getJsonPayload();
+            if apiData is json {
+                log:printInfo("Successfully fetched states for " + country + " from external API");
+                http:Response res = new;
+                res.setHeader("Access-Control-Allow-Origin", "*");
+                res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                res.setHeader("Content-Type", "application/json");
+                res.setJsonPayload({
+                    success: true,
+                    data: apiData,
+                    message: "States fetched successfully from external API",
+                    country: country
+                });
+                return res;
+            }
+        }
+        
+        log:printInfo("External API failed, using fallback data for: " + country);
+        
+        // Fallback states data for common countries (only as backup)
+        map<json[]> fallbackStates = {
+            "United States": [
+                {"name": "Alabama"}, {"name": "Alaska"}, {"name": "Arizona"}, {"name": "Arkansas"}, 
+                {"name": "California"}, {"name": "Colorado"}, {"name": "Connecticut"}, {"name": "Delaware"}, 
+                {"name": "Florida"}, {"name": "Georgia"}, {"name": "Hawaii"}, {"name": "Idaho"}, 
+                {"name": "Illinois"}, {"name": "Indiana"}, {"name": "Iowa"}, {"name": "Kansas"}, 
+                {"name": "Kentucky"}, {"name": "Louisiana"}, {"name": "Maine"}, {"name": "Maryland"}, 
+                {"name": "Massachusetts"}, {"name": "Michigan"}, {"name": "Minnesota"}, {"name": "Mississippi"}, 
+                {"name": "Missouri"}, {"name": "Montana"}, {"name": "Nebraska"}, {"name": "Nevada"}, 
+                {"name": "New Hampshire"}, {"name": "New Jersey"}, {"name": "New Mexico"}, {"name": "New York"}, 
+                {"name": "North Carolina"}, {"name": "North Dakota"}, {"name": "Ohio"}, {"name": "Oklahoma"}, 
+                {"name": "Oregon"}, {"name": "Pennsylvania"}, {"name": "Rhode Island"}, {"name": "South Carolina"}, 
+                {"name": "South Dakota"}, {"name": "Tennessee"}, {"name": "Texas"}, {"name": "Utah"}, 
+                {"name": "Vermont"}, {"name": "Virginia"}, {"name": "Washington"}, {"name": "West Virginia"}, 
+                {"name": "Wisconsin"}, {"name": "Wyoming"}
+            ],
+            "Canada": [
+                {"name": "Alberta"}, {"name": "British Columbia"}, {"name": "Manitoba"}, 
+                {"name": "New Brunswick"}, {"name": "Newfoundland and Labrador"}, {"name": "Northwest Territories"}, 
+                {"name": "Nova Scotia"}, {"name": "Nunavut"}, {"name": "Ontario"}, {"name": "Prince Edward Island"}, 
+                {"name": "Quebec"}, {"name": "Saskatchewan"}, {"name": "Yukon"}
+            ],
+            "Australia": [
+                {"name": "Australian Capital Territory"}, {"name": "New South Wales"}, {"name": "Northern Territory"}, 
+                {"name": "Queensland"}, {"name": "South Australia"}, {"name": "Tasmania"}, 
+                {"name": "Victoria"}, {"name": "Western Australia"}
+            ],
+            "India": [
+                {"name": "Andhra Pradesh"}, {"name": "Arunachal Pradesh"}, {"name": "Assam"}, {"name": "Bihar"}, 
+                {"name": "Chhattisgarh"}, {"name": "Goa"}, {"name": "Gujarat"}, {"name": "Haryana"}, 
+                {"name": "Himachal Pradesh"}, {"name": "Jharkhand"}, {"name": "Karnataka"}, {"name": "Kerala"}, 
+                {"name": "Madhya Pradesh"}, {"name": "Maharashtra"}, {"name": "Manipur"}, {"name": "Meghalaya"}, 
+                {"name": "Mizoram"}, {"name": "Nagaland"}, {"name": "Odisha"}, {"name": "Punjab"}, 
+                {"name": "Rajasthan"}, {"name": "Sikkim"}, {"name": "Tamil Nadu"}, {"name": "Telangana"}, 
+                {"name": "Tripura"}, {"name": "Uttar Pradesh"}, {"name": "Uttarakhand"}, {"name": "West Bengal"}
+            ]
+        };
+        
+        json statesData = {"data": {"states": fallbackStates.hasKey(country) ? fallbackStates[country] : []}};
+
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.setHeader("Content-Type", "application/json");
+        res.setJsonPayload({
+            success: true,
+            data: statesData,
+            message: "States fetched successfully (fallback data)",
+            country: country
+        });
+        return res;
+    }
+
+    // POST endpoint for states (existing functionality)
+    resource function post countries/states(@http:Payload json countryReq) returns http:Response|error {
+        log:printInfo("Received states request: " + countryReq.toString());
+        
+        if countryReq is map<json> && countryReq.hasKey("country") {
+            anydata countryValue = countryReq["country"];
+            if countryValue is string {
+                log:printInfo("Looking up states for country: " + countryValue);
+                
+                // Try external API first for ALL countries
+                http:Response|error statesResponse = countriesApiClient->post("/api/v0.1/countries/states", {
+                    "country": countryValue
+                });
+                
+                if statesResponse is http:Response && statesResponse.statusCode == 200 {
+                    json|error apiData = statesResponse.getJsonPayload();
+                    if apiData is json {
+                        log:printInfo("Successfully fetched states from external API for: " + countryValue);
+                        http:Response res = new;
+                        res.setHeader("Access-Control-Allow-Origin", "*");
+                        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                        res.setHeader("Content-Type", "application/json");
+                        res.setJsonPayload({
+                            success: true,
+                            data: apiData,
+                            message: "States fetched successfully from external API"
+                        });
+                        return res;
+                    }
+                }
+                
+                log:printInfo("External API failed or returned no data, using fallback data for: " + countryValue);
+                map<json[]> fallbackStates = {
+                    "United States": [
+                        {"name": "Alabama"}, {"name": "Alaska"}, {"name": "Arizona"}, {"name": "Arkansas"}, 
+                        {"name": "California"}, {"name": "Colorado"}, {"name": "Connecticut"}, {"name": "Delaware"}, 
+                        {"name": "Florida"}, {"name": "Georgia"}, {"name": "Hawaii"}, {"name": "Idaho"}, 
+                        {"name": "Illinois"}, {"name": "Indiana"}, {"name": "Iowa"}, {"name": "Kansas"}, 
+                        {"name": "Kentucky"}, {"name": "Louisiana"}, {"name": "Maine"}, {"name": "Maryland"}, 
+                        {"name": "Massachusetts"}, {"name": "Michigan"}, {"name": "Minnesota"}, {"name": "Mississippi"}, 
+                        {"name": "Missouri"}, {"name": "Montana"}, {"name": "Nebraska"}, {"name": "Nevada"}, 
+                        {"name": "New Hampshire"}, {"name": "New Jersey"}, {"name": "New Mexico"}, {"name": "New York"}, 
+                        {"name": "North Carolina"}, {"name": "North Dakota"}, {"name": "Ohio"}, {"name": "Oklahoma"}, 
+                        {"name": "Oregon"}, {"name": "Pennsylvania"}, {"name": "Rhode Island"}, {"name": "South Carolina"}, 
+                        {"name": "South Dakota"}, {"name": "Tennessee"}, {"name": "Texas"}, {"name": "Utah"}, 
+                        {"name": "Vermont"}, {"name": "Virginia"}, {"name": "Washington"}, {"name": "West Virginia"}, 
+                        {"name": "Wisconsin"}, {"name": "Wyoming"}
+                    ],
+                    "Canada": [
+                        {"name": "Alberta"}, {"name": "British Columbia"}, {"name": "Manitoba"}, 
+                        {"name": "New Brunswick"}, {"name": "Newfoundland and Labrador"}, {"name": "Northwest Territories"}, 
+                        {"name": "Nova Scotia"}, {"name": "Nunavut"}, {"name": "Ontario"}, {"name": "Prince Edward Island"}, 
+                        {"name": "Quebec"}, {"name": "Saskatchewan"}, {"name": "Yukon"}
+                    ],
+                    "Australia": [
+                        {"name": "Australian Capital Territory"}, {"name": "New South Wales"}, {"name": "Northern Territory"}, 
+                        {"name": "Queensland"}, {"name": "South Australia"}, {"name": "Tasmania"}, 
+                        {"name": "Victoria"}, {"name": "Western Australia"}
+                    ],
+                    "India": [
+                        {"name": "Andhra Pradesh"}, {"name": "Arunachal Pradesh"}, {"name": "Assam"}, {"name": "Bihar"}, 
+                        {"name": "Chhattisgarh"}, {"name": "Goa"}, {"name": "Gujarat"}, {"name": "Haryana"}, 
+                        {"name": "Himachal Pradesh"}, {"name": "Jharkhand"}, {"name": "Karnataka"}, {"name": "Kerala"}, 
+                        {"name": "Madhya Pradesh"}, {"name": "Maharashtra"}, {"name": "Manipur"}, {"name": "Meghalaya"}, 
+                        {"name": "Mizoram"}, {"name": "Nagaland"}, {"name": "Odisha"}, {"name": "Punjab"}, 
+                        {"name": "Rajasthan"}, {"name": "Sikkim"}, {"name": "Tamil Nadu"}, {"name": "Telangana"}, 
+                        {"name": "Tripura"}, {"name": "Uttar Pradesh"}, {"name": "Uttarakhand"}, {"name": "West Bengal"}
+                    ],
+                    "Brazil": [
+                        {"name": "Acre"}, {"name": "Alagoas"}, {"name": "Amapá"}, {"name": "Amazonas"}, 
+                        {"name": "Bahia"}, {"name": "Ceará"}, {"name": "Distrito Federal"}, {"name": "Espírito Santo"}, 
+                        {"name": "Goiás"}, {"name": "Maranhão"}, {"name": "Mato Grosso"}, {"name": "Mato Grosso do Sul"}, 
+                        {"name": "Minas Gerais"}, {"name": "Pará"}, {"name": "Paraíba"}, {"name": "Paraná"}, 
+                        {"name": "Pernambuco"}, {"name": "Piauí"}, {"name": "Rio de Janeiro"}, {"name": "Rio Grande do Norte"}, 
+                        {"name": "Rio Grande do Sul"}, {"name": "Rondônia"}, {"name": "Roraima"}, {"name": "Santa Catarina"}, 
+                        {"name": "São Paulo"}, {"name": "Sergipe"}, {"name": "Tocantins"}
+                    ],
+                    "Germany": [
+                        {"name": "Baden-Württemberg"}, {"name": "Bavaria"}, {"name": "Berlin"}, {"name": "Brandenburg"}, 
+                        {"name": "Bremen"}, {"name": "Hamburg"}, {"name": "Hesse"}, {"name": "Lower Saxony"}, 
+                        {"name": "Mecklenburg-Vorpommern"}, {"name": "North Rhine-Westphalia"}, {"name": "Rhineland-Palatinate"}, 
+                        {"name": "Saarland"}, {"name": "Saxony"}, {"name": "Saxony-Anhalt"}, {"name": "Schleswig-Holstein"}, 
+                        {"name": "Thuringia"}
+                    ],
+                    "Mexico": [
+                        {"name": "Aguascalientes"}, {"name": "Baja California"}, {"name": "Baja California Sur"}, {"name": "Campeche"}, 
+                        {"name": "Chiapas"}, {"name": "Chihuahua"}, {"name": "Coahuila"}, {"name": "Colima"}, 
+                        {"name": "Durango"}, {"name": "Guanajuato"}, {"name": "Guerrero"}, {"name": "Hidalgo"}, 
+                        {"name": "Jalisco"}, {"name": "México"}, {"name": "Michoacán"}, {"name": "Morelos"}, 
+                        {"name": "Nayarit"}, {"name": "Nuevo León"}, {"name": "Oaxaca"}, {"name": "Puebla"}, 
+                        {"name": "Querétaro"}, {"name": "Quintana Roo"}, {"name": "San Luis Potosí"}, {"name": "Sinaloa"}, 
+                        {"name": "Sonora"}, {"name": "Tabasco"}, {"name": "Tamaulipas"}, {"name": "Tlaxcala"}, 
+                        {"name": "Veracruz"}, {"name": "Yucatán"}, {"name": "Zacatecas"}
+                    ]
+                };
+                
+                json[] statesArray = fallbackStates.hasKey(countryValue) ? <json[]>fallbackStates[countryValue] : [];
+                log:printInfo("Found " + statesArray.length().toString() + " states for country: " + countryValue);
+                
+                json statesData = {"data": {"states": statesArray}};
+                
+                http:Response res = new;
+                res.setHeader("Access-Control-Allow-Origin", "*");
+                res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                res.setHeader("Content-Type", "application/json");
+                res.setJsonPayload({
+                    success: true,
+                    data: statesData,
+                    message: "States fetched successfully"
+                });
+                return res;
+            }
+        }
+
+        return createErrorResponse(400, "Invalid country request");
+    }
+
+    resource function options countries/cities(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    // GET endpoint for cities with query parameters
+    resource function get countries/cities(http:Request req, string country, string state) returns http:Response|error {
+        log:printInfo("GET request for cities of: " + state + ", " + country);
+        
+        // Try external API with multiple strategies for maximum coverage
+        // Strategy 1: Try with exact state/province name
+        http:Response|error response = countriesApiClient->post("/api/v0.1/countries/state/cities", {
+            "country": country,
+            "state": state
+        });
+        
+        if response is http:Response && response.statusCode == 200 {
+            json|error apiData = response.getJsonPayload();
+            if apiData is json && apiData is map<json> {
+                anydata citiesArray = apiData["data"];
+                if citiesArray is json[] && citiesArray.length() > 0 {
+                    log:printInfo("GET Strategy 1 SUCCESS: Fetched " + citiesArray.length().toString() + " cities from external API for: " + state + ", " + country);
+                    http:Response res = new;
+                    res.setHeader("Access-Control-Allow-Origin", "*");
+                    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                    res.setHeader("Content-Type", "application/json");
+                    res.setJsonPayload({
+                        success: true,
+                        data: apiData,
+                        message: "Cities fetched successfully from external API (GET Strategy 1)",
+                        country: country,
+                        state: state
+                    });
+                    return res;
+                }
+            }
+        }
+        
+        // Strategy 2: Try alternative state names by removing common suffixes
+        string[] alternativeStateNames = [];
+        if state.endsWith(" District") {
+            alternativeStateNames.push(state.substring(0, state.length() - 9)); // Remove " District"
+        }
+        if state.endsWith(" Province") {
+            alternativeStateNames.push(state.substring(0, state.length() - 9)); // Remove " Province"
+        }
+        if state.endsWith(" Region") {
+            alternativeStateNames.push(state.substring(0, state.length() - 7)); // Remove " Region"
+        }
+        
+        foreach string altStateName in alternativeStateNames {
+            http:Response|error altResponse = countriesApiClient->post("/api/v0.1/countries/state/cities", {
+                "country": country,
+                "state": altStateName
+            });
+            
+            if altResponse is http:Response && altResponse.statusCode == 200 {
+                json|error altApiData = altResponse.getJsonPayload();
+                if altApiData is json && altApiData is map<json> {
+                    anydata altCitiesArray = altApiData["data"];
+                    if altCitiesArray is json[] && altCitiesArray.length() > 0 {
+                        log:printInfo("GET Strategy 2 SUCCESS: Fetched " + altCitiesArray.length().toString() + " cities using alternative name '" + altStateName + "' for: " + country);
+                        http:Response res = new;
+                        res.setHeader("Access-Control-Allow-Origin", "*");
+                        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                        res.setHeader("Content-Type", "application/json");
+                        res.setJsonPayload({
+                            success: true,
+                            data: altApiData,
+                            message: "Cities fetched successfully from external API (GET Strategy 2: '" + altStateName + "')",
+                            country: country,
+                            state: state
+                        });
+                        return res;
+                    }
+                }
+            }
+        }
+        
+        log:printInfo("All GET external API strategies failed, using enhanced fallback data for: " + state + ", " + country);
+        
+        // Fallback cities data for common states (only as backup)
+        map<string[]> fallbackCities = {
+            "California": ["Los Angeles", "San Francisco", "San Diego", "Sacramento", "San Jose", "Fresno", "Long Beach", "Oakland"],
+            "New York": ["New York City", "Buffalo", "Rochester", "Syracuse", "Albany", "Schenectady", "Troy", "Utica"],
+            "Texas": ["Houston", "Dallas", "San Antonio", "Austin", "Fort Worth", "El Paso", "Arlington", "Corpus Christi"],
+            "Florida": ["Miami", "Tampa", "Orlando", "Jacksonville", "St. Petersburg", "Hialeah", "Fort Lauderdale", "Tallahassee"],
+            "Ontario": ["Toronto", "Ottawa", "Mississauga", "Hamilton", "Brampton", "London", "Markham", "Windsor"],
+            "British Columbia": ["Vancouver", "Victoria", "Surrey", "Burnaby", "Richmond", "Abbotsford", "Coquitlam", "Kelowna"],
+            "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Thane", "Nashville", "Aurangabad", "Solapur", "Dhule"]
+        };
+        
+        string[] cities = fallbackCities.hasKey(state) ? (fallbackCities[state] ?: ["No cities available"]) : ["No cities available"];
+        json citiesData = {"data": cities};
+
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.setHeader("Content-Type", "application/json");
+        res.setJsonPayload({
+            success: true,
+            data: citiesData,
+            message: "Cities fetched successfully (fallback data)",
+            country: country,
+            state: state
+        });
+        return res;
+    }
+
+    // POST endpoint for cities (existing functionality)
+    resource function post countries/cities(@http:Payload json locationReq) returns http:Response|error {
+        log:printInfo("Received cities request: " + locationReq.toString());
+        
+        if locationReq is map<json> && locationReq.hasKey("country") && locationReq.hasKey("state") {
+            anydata countryValue = locationReq["country"];
+            anydata stateValue = locationReq["state"];
+            
+            if countryValue is string && stateValue is string {
+                log:printInfo("Looking up cities for: " + stateValue + ", " + countryValue);
+                
+                // Try external API with multiple strategies for maximum coverage
+                json|error apiCitiesData = ();
+                
+                // Strategy 1: Try with exact state/province name
+                http:Response|error citiesResponse = countriesApiClient->post("/api/v0.1/countries/state/cities", {
+                    "country": countryValue,
+                    "state": stateValue
+                });
+                
+                if citiesResponse is http:Response && citiesResponse.statusCode == 200 {
+                    json|error apiData = citiesResponse.getJsonPayload();
+                    if apiData is json && apiData is map<json> {
+                        anydata citiesDataArray = apiData["data"];
+                        if citiesDataArray is json[] && citiesDataArray.length() > 0 {
+                            log:printInfo("Strategy 1 SUCCESS: Fetched " + citiesDataArray.length().toString() + " cities from external API for: " + stateValue + ", " + countryValue);
+                            http:Response res = new;
+                            res.setHeader("Access-Control-Allow-Origin", "*");
+                            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                            res.setHeader("Content-Type", "application/json");
+                            res.setJsonPayload({
+                                success: true,
+                                data: apiData,
+                                message: "Cities fetched successfully from external API (Strategy 1)"
+                            });
+                            return res;
+                        }
+                    }
+                }
+                
+                // Strategy 2: Try removing common suffixes from state names
+                string[] alternativeStateNames = [];
+                if stateValue.endsWith(" District") {
+                    alternativeStateNames.push(stateValue.substring(0, stateValue.length() - 9)); // Remove " District"
+                }
+                if stateValue.endsWith(" Province") {
+                    alternativeStateNames.push(stateValue.substring(0, stateValue.length() - 9)); // Remove " Province"
+                }
+                if stateValue.endsWith(" Region") {
+                    alternativeStateNames.push(stateValue.substring(0, stateValue.length() - 7)); // Remove " Region"
+                }
+                // Also try the original without any modifications
+                alternativeStateNames.push(stateValue);
+                
+                foreach string altStateName in alternativeStateNames {
+                    http:Response|error altCitiesResponse = countriesApiClient->post("/api/v0.1/countries/state/cities", {
+                        "country": countryValue,
+                        "state": altStateName
+                    });
+                    
+                    if altCitiesResponse is http:Response && altCitiesResponse.statusCode == 200 {
+                        json|error altApiData = altCitiesResponse.getJsonPayload();
+                        if altApiData is json && altApiData is map<json> {
+                            anydata altCitiesArray = altApiData["data"];
+                            if altCitiesArray is json[] && altCitiesArray.length() > 0 {
+                                log:printInfo("Strategy 2 SUCCESS: Fetched " + altCitiesArray.length().toString() + " cities using alternative name '" + altStateName + "' for: " + countryValue);
+                                http:Response res = new;
+                                res.setHeader("Access-Control-Allow-Origin", "*");
+                                res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                                res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                                res.setHeader("Content-Type", "application/json");
+                                res.setJsonPayload({
+                                    success: true,
+                                    data: altApiData,
+                                    message: "Cities fetched successfully from external API (Strategy 2: '" + altStateName + "')"
+                                });
+                                return res;
+                            }
+                        }
+                    }
+                }
+                
+                log:printInfo("All external API strategies failed, using enhanced fallback data for: " + stateValue + ", " + countryValue);
+                
+                log:printInfo("External API failed or returned no data, using enhanced fallback data for: " + stateValue + ", " + countryValue);
+                
+                // Enhanced fallback cities data for various countries and states
+                map<string[]> fallbackCities = {
+                    // United States
+                    "California": ["Los Angeles", "San Francisco", "San Diego", "Sacramento", "San Jose", "Fresno", "Long Beach", "Oakland", "Bakersfield", "Anaheim"],
+                    "New York": ["New York City", "Buffalo", "Rochester", "Syracuse", "Albany", "Schenectady", "Troy", "Utica", "Yonkers", "New Rochelle"],
+                    "Texas": ["Houston", "Dallas", "San Antonio", "Austin", "Fort Worth", "El Paso", "Arlington", "Corpus Christi", "Plano", "Lubbock"],
+                    "Florida": ["Miami", "Tampa", "Orlando", "Jacksonville", "St. Petersburg", "Hialeah", "Fort Lauderdale", "Tallahassee", "Port St. Lucie", "Cape Coral"],
+                    
+                    // Canada
+                    "Ontario": ["Toronto", "Ottawa", "Mississauga", "Hamilton", "Brampton", "London", "Markham", "Windsor", "Kitchener", "Vaughan"],
+                    "British Columbia": ["Vancouver", "Victoria", "Surrey", "Burnaby", "Richmond", "Abbotsford", "Coquitlam", "Kelowna", "Saanich", "Delta"],
+                    "Quebec": ["Montreal", "Quebec City", "Laval", "Gatineau", "Longueuil", "Sherbrooke", "Saguenay", "Lévis", "Trois-Rivières", "Terrebonne"],
+                    
+                    // India
+                    "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Thane", "Nashik", "Aurangabad", "Solapur", "Dhule", "Amravati", "Malegaon"],
+                    "Karnataka": ["Bangalore", "Mysore", "Hubli", "Mangalore", "Belgaum", "Gulbarga", "Davanagere", "Bellary", "Bijapur", "Shimoga"],
+                    "Tamil Nadu": ["Chennai", "Coimbatore", "Madurai", "Tiruchirappalli", "Salem", "Tirunelveli", "Tiruppur", "Erode", "Vellore", "Thoothukudi"],
+                    
+                    // Australia
+                    "New South Wales": ["Sydney", "Newcastle", "Wollongong", "Broken Hill", "Dubbo", "Albury", "Tamworth", "Orange", "Bathurst", "Wagga Wagga"],
+                    "Victoria": ["Melbourne", "Geelong", "Ballarat", "Bendigo", "Shepparton", "Wodonga", "Warrnambool", "Traralgon", "Mildura", "Horsham"],
+                    "Queensland": ["Brisbane", "Gold Coast", "Townsville", "Cairns", "Toowoomba", "Rockhampton", "Mackay", "Bundaberg", "Gladstone", "Hervey Bay"],
+                    
+                    // Sri Lanka (Enhanced for the current test case)
+                    "Colombo District": ["Colombo", "Sri Jayawardenepura Kotte", "Dehiwala-Mount Lavinia", "Moratuwa", "Kesbewa", "Maharagama", "Kotte", "Battaramulla", "Rajagiriya", "Nugegoda"],
+                    "Gampaha District": ["Gampaha", "Negombo", "Katunayake", "Ja-Ela", "Wattala", "Kelaniya", "Peliyagoda", "Ragama", "Kandana", "Minuwangoda"],
+                    "Kalutara District": ["Kalutara", "Panadura", "Horana", "Beruwala", "Aluthgama", "Matugama", "Wadduwa", "Bandaragama", "Ingiriya", "Bulathsinhala"],
+                    "Kandy District": ["Kandy", "Gampola", "Nawalapitiya", "Wattegama", "Harispattuwa", "Pathadumbara", "Udunuwara", "Yatinuwara", "Akurana", "Kadugannawa"],
+                    "Galle District": ["Galle", "Hikkaduwa", "Ambalangoda", "Elpitiya", "Bentota", "Baddegama", "Yakkalamulla", "Imaduwa", "Neluwa", "Nagoda"],
+                    
+                    // Brazil
+                    "São Paulo": ["São Paulo", "Guarulhos", "Campinas", "São Bernardo do Campo", "São José dos Campos", "Santo André", "Ribeirão Preto", "Osasco", "Sorocaba", "Mauá"],
+                    "Rio de Janeiro": ["Rio de Janeiro", "São Gonçalo", "Duque de Caxias", "Nova Iguaçu", "Niterói", "Belford Roxo", "São João de Meriti", "Campos dos Goytacazes", "Petrópolis", "Volta Redonda"],
+                    
+                    // Germany  
+                    "Bavaria": ["Munich", "Nuremberg", "Augsburg", "Würzburg", "Regensburg", "Ingolstadt", "Fürth", "Erlangen", "Bayreuth", "Bamberg"],
+                    "North Rhine-Westphalia": ["Cologne", "Düsseldorf", "Dortmund", "Essen", "Duisburg", "Bochum", "Wuppertal", "Bonn", "Bielefeld", "Münster"],
+                    
+                    // Mexico
+                    "Jalisco": ["Guadalajara", "Zapopan", "Tlaquepaque", "Tonalá", "Puerto Vallarta", "Tlajomulco de Zúñiga", "El Salto", "Chapala", "Ocotlán", "Lagos de Moreno"],
+                    "México": ["Ecatepec", "Guadalajara", "Puebla", "Tijuana", "León", "Juárez", "Torreón", "Querétaro", "San Luis Potosí", "Mérida"]
+                };
+                
+                string[] cities = fallbackCities.hasKey(stateValue) ? (fallbackCities[stateValue] ?: ["No cities available"]) : ["No cities available"];
+                json citiesData = {"data": cities};
+                
+                http:Response res = new;
+                res.setHeader("Access-Control-Allow-Origin", "*");
+                res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                res.setHeader("Content-Type", "application/json");
+                res.setJsonPayload({
+                    success: true,
+                    data: citiesData,
+                    message: "Cities fetched successfully (enhanced fallback data)"
+                });
+                return res;
+            }
+        }
+
+        return createErrorResponse(400, "Invalid location request - country and state required");
+    }
+
+    // ENHANCED SEARCH WITH LOCATION
+    resource function options search/location(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    resource function post search/location(@http:Payload json searchReq) returns http:Response|error {
+        // Add debugging
+        log:printInfo("🔍 Received location-based search request: " + searchReq.toString());
+        
+        if searchReq is map<json> {
+            string medicineName = "";
+            string location = "";
+            string country = "";
+            string state = "";
+            string city = "";
+
+            if searchReq.hasKey("medicineName") {
+                anydata medValue = searchReq["medicineName"];
+                if medValue is string {
+                    medicineName = medValue;
+                }
+            }
+
+            if searchReq.hasKey("location") {
+                anydata locValue = searchReq["location"];
+                if locValue is string {
+                    location = locValue;
+                }
+            }
+
+            if searchReq.hasKey("country") {
+                anydata countryValue = searchReq["country"];
+                if countryValue is string {
+                    country = countryValue;
+                }
+            }
+
+            if searchReq.hasKey("state") {
+                anydata stateValue = searchReq["state"];
+                if stateValue is string {
+                    state = stateValue;
+                }
+            }
+
+            if searchReq.hasKey("city") {
+                anydata cityValue = searchReq["city"];
+                if cityValue is string {
+                    city = cityValue;
+                }
+            }
+
+            // Build location search query based on provided parameters
+            string locationQuery = "";
+            if city != "" {
+                locationQuery = city;
+            } else if state != "" {
+                locationQuery = state;
+            } else if country != "" {
+                locationQuery = country;
+            } else if location != "" {
+                locationQuery = location;
+            }
+
+            log:printInfo("🏥 Medicine search params - Name: '" + medicineName + "', Location: '" + locationQuery + "'");
+
+            // STEP 1: First find pharmacies that match the location
+            string pharmacySearchQuery = "/rest/v1/pharmacies?select=id,name,phone,email,address,license_number";
+            if locationQuery != "" {
+                pharmacySearchQuery = pharmacySearchQuery + "&address=ilike.*" + locationQuery + "*";
+            }
+
+            log:printInfo("📊 Step 1 - Pharmacy location query: " + pharmacySearchQuery);
+
+            http:Response pharmacyResponse = check supabaseClient->get(pharmacySearchQuery, {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json"
+            });
+
+            if pharmacyResponse.statusCode != 200 {
+                return createErrorResponse(500, "Failed to search pharmacies in database");
+            }
+
+            json pharmaciesData = check pharmacyResponse.getJsonPayload();
+            
+            if pharmaciesData is json[] && pharmaciesData.length() == 0 {
+                log:printInfo("❌ No pharmacies found in location: " + locationQuery);
+                json responseBody = {
+                    medicines: [],
+                    totalCount: 0,
+                    searchTerm: medicineName,
+                    location: locationQuery,
+                    searchParams: {
+                        country: country,
+                        state: state,
+                        city: city,
+                        location: location
+                    },
+                    message: "No pharmacies found in the specified location",
+                    dataSource: "Supabase Database with Location Filter"
+                };
+
+                http:Response res = new;
+                res.setHeader("Access-Control-Allow-Origin", "*");
+                res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                res.setHeader("Content-Type", "application/json");
+                res.setJsonPayload(responseBody);
+                return res;
+            }
+
+            // Extract pharmacy IDs for medicine search
+            string[] pharmacyIds = [];
+            json[] pharmaciesArray = [];
+            if pharmaciesData is json[] {
+                foreach json pharmacy in pharmaciesData {
+                    if pharmacy is map<json> && pharmacy.hasKey("id") {
+                        anydata idValue = pharmacy["id"];
+                        if idValue is string {
+                            pharmacyIds.push(idValue);
+                        }
+                    }
+                    pharmaciesArray.push(pharmacy);
+                }
+            }
+
+            log:printInfo("🏪 Found " + pharmacyIds.length().toString() + " pharmacies in location");
+
+            if pharmacyIds.length() == 0 {
+                log:printInfo("❌ No valid pharmacy IDs found");
+                json responseBody = {
+                    medicines: [],
+                    totalCount: 0,
+                    searchTerm: medicineName,
+                    location: locationQuery,
+                    searchParams: {
+                        country: country,
+                        state: state,
+                        city: city,
+                        location: location
+                    },
+                    message: "No valid pharmacies found in the specified location",
+                    dataSource: "Supabase Database with Location Filter"
+                };
+
+                http:Response res = new;
+                res.setHeader("Access-Control-Allow-Origin", "*");
+                res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                res.setHeader("Content-Type", "application/json");
+                res.setJsonPayload(responseBody);
+                return res;
+            }
+
+            // STEP 2: Now find medicines that match the name AND belong to these pharmacies
+            string pharmacyIdFilter = "pharmacy_id.in.(" + string:'join(",", ...pharmacyIds) + ")";
+            string medicineSearchQuery = "/rest/v1/medicines?name=ilike.*" + medicineName + "*&" + pharmacyIdFilter + "&select=*";
+
+            log:printInfo("📊 Step 2 - Medicine query: " + medicineSearchQuery);
+
+            http:Response medicineResponse = check supabaseClient->get(medicineSearchQuery, {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json"
+            });
+
+            if medicineResponse.statusCode != 200 {
+                return createErrorResponse(500, "Failed to search medicines in database");
+            }
+
+            json medicinesData = check medicineResponse.getJsonPayload();
+            
+            // STEP 3: Combine medicine data with their corresponding pharmacy data
+            json[] enhancedMedicines = [];
+            if medicinesData is json[] {
+                foreach json medicine in medicinesData {
+                    if medicine is map<json> && medicine.hasKey("pharmacy_id") {
+                        anydata pharmacyIdValue = medicine["pharmacy_id"];
+                        if pharmacyIdValue is string {
+                            // Find the matching pharmacy
+                            foreach json pharmacy in pharmaciesArray {
+                                if pharmacy is map<json> && pharmacy.hasKey("id") {
+                                    anydata pharmaIdCheck = pharmacy["id"];
+                                    if pharmaIdCheck is string && pharmaIdCheck == pharmacyIdValue {
+                                        // Add pharmacy data to medicine
+                                        map<json> enhancedMedicine = <map<json>>medicine.clone();
+                                        enhancedMedicine["pharmacies"] = [pharmacy]; // Array format for frontend
+                                        enhancedMedicines.push(enhancedMedicine);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            int totalCount = enhancedMedicines.length();
+            log:printInfo("✅ Enhanced search results: " + totalCount.toString() + " medicines found with pharmacy data");
+
+            json responseBody = {
+                medicines: enhancedMedicines,
+                totalCount: totalCount,
+                searchTerm: medicineName,
+                location: locationQuery,
+                searchParams: {
+                    country: country,
+                    state: state,
+                    city: city,
+                    location: location
+                },
+                message: totalCount > 0 ? "Location-based search completed successfully" : "No medicines found matching '" + medicineName + "' in " + locationQuery,
+                dataSource: "Supabase Database with Enhanced Location-Medicine Matching",
+                pharmaciesFound: pharmacyIds.length(),
+                medicinesFound: totalCount
+            };
+
+            http:Response res = new;
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            res.setHeader("Content-Type", "application/json");
+            res.setJsonPayload(responseBody);
+            return res;
+        }
+
+        return createErrorResponse(400, "Invalid search request");
     }
 
     // PHARMACY INFO

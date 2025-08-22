@@ -60,15 +60,83 @@ const Index = () => {
 
   const handleSearch = async (medicine: string, location: string) => {
     setIsLoading(true);
+    console.log(`🔍 Starting search for: "${medicine}" in location: "${location}"`);
+    console.log('🧪 Location analysis:');
+    console.log('  - Location value:', JSON.stringify(location));
+    console.log('  - Contains comma:', location.includes(','));
+    console.log('  - Not auto-detected:', location !== "Auto-detected location");
+    console.log('  - Will use manual location search:', location !== "Auto-detected location" && location.includes(','));
+    
     try {
-      const response = await api.searchMedicines(medicine, location);
+      let response;
+      
+      // Check if location is manual (contains comma-separated values) vs auto-detected
+      if (location !== "Auto-detected location" && location.includes(',')) {
+        console.log('🎯 MANUAL LOCATION SEARCH PATH');
+        // Parse manual location: "City, State, Country"
+        const locationParts = location.split(',').map(part => part.trim());
+        console.log('📍 Parsed location parts:', locationParts);
+        
+        if (locationParts.length >= 3) {
+          const [city, state, country] = locationParts;
+          
+          // Use location-specific search API
+          const searchParams = {
+            medicineName: medicine.trim(),
+            country,
+            state,
+            city,
+            location
+          };
+          
+          console.log('🌍 Using location-based search with params:', searchParams);
+          
+          try {
+            const locationResponse = await api.searchMedicinesWithLocation(searchParams);
+            console.log('📊 Location search response:', locationResponse);
+            
+            if (locationResponse && locationResponse.medicines) {
+              response = { medicines: locationResponse.medicines };
+              console.log(`✅ Location-based search successful: ${locationResponse.medicines.length} results`);
+              console.log('📋 Sample result:', locationResponse.medicines[0]);
+            } else {
+              console.log('❌ Location-based search returned no data, using fallback');
+              response = await api.searchMedicines(medicine, location);
+            }
+          } catch (error) {
+            console.error('💥 Location-based search failed with error:', error);
+            console.log('🔄 Falling back to regular search');
+            response = await api.searchMedicines(medicine, location);
+          }
+        } else {
+          // Fallback to regular search if location parsing fails
+          console.log('⚠️ Location parsing failed, using regular search');
+          response = await api.searchMedicines(medicine, location);
+        }
+      } else {
+        // Use regular search for auto-detected location or locations without commas
+        console.log('🤖 Using regular search for auto-detected location or location without comma format');
+        console.log('🔎 Fallback search params:', { medicine, location });
+        response = await api.searchMedicines(medicine, location);
+      }
+      
+      const resultsCount = response.medicines?.length || 0;
       setSearchResults({ medicine, location, medicines: response.medicines || [] });
       
-      // Show success toast
-      toast({
-        title: "Search Completed",
-        description: `Found ${response.medicines?.length || 0} results for "${medicine}"`,
-      });
+      // Show appropriate success toast based on results
+      if (resultsCount > 0) {
+        toast({
+          title: "Search Completed Successfully! 🎉",
+          description: `Found ${resultsCount} pharmacies with "${medicine}" in your area`,
+          className: "bg-green-50 border-green-200 text-green-800"
+        });
+      } else {
+        toast({
+          title: "No Results Found 😞",
+          description: `No pharmacies found with "${medicine}" in ${location.split(',')[0] || location}. Try a nearby area or check spelling.`,
+          className: "bg-yellow-50 border-yellow-200 text-yellow-800"
+        });
+      }
       
       // Automatically scroll to search results after a short delay to ensure they're rendered
       setTimeout(() => {
