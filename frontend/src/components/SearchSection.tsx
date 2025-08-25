@@ -145,16 +145,71 @@ export const SearchSection = ({ onSearch, isLoading = false }: SearchSectionProp
 
       try {
         setIsLoadingLocations(true);
+        console.log('🏙️ Loading cities for:', province, 'in', country);
         const response = await api.getCities(country, province);
+        console.log('🏙️ Cities API response:', response);
+        
         if (response.success && response.data?.data) {
-          setCities(response.data.data);
+          const citiesData = response.data.data;
+          console.log('🏙️ Raw cities data:', citiesData);
+          
+          // Filter out empty cities and "No cities available" entries
+          const validCities = Array.isArray(citiesData) 
+            ? citiesData.filter(city => 
+                city && 
+                typeof city === 'string' && 
+                city.trim() !== '' && 
+                city !== "No cities available" &&
+                !city.includes("No cities")
+              )
+            : [];
+            
+          console.log('🏙️ Filtered valid cities:', validCities);
+          setCities(validCities);
+          
+          // If no valid cities found for this state, we should remove this state from the states list
+          // and show a user-friendly message
+          if (validCities.length === 0) {
+            console.log('❌ No cities found for state:', province);
+            toast({
+              variant: "destructive",
+              title: "No Cities Available",
+              description: `${province} doesn't have any cities available. Please select a different state.`,
+            });
+            
+            // Filter out this state from the states list to prevent future selection
+            setStates(prevStates => prevStates.filter(state => state.name !== province));
+            setProvince(""); // Clear the current selection
+          }
         } else {
+          console.log('❌ Invalid cities response:', response);
           setCities([]);
+          
+          // Show user-friendly message for states with no cities
+          toast({
+            variant: "destructive", 
+            title: "No Cities Available",
+            description: `No cities found for ${province}. Please try a different state.`,
+          });
+          
+          // Remove this state from the list since it has no cities
+          setStates(prevStates => prevStates.filter(state => state.name !== province));
+          setProvince("");
         }
         setCity("");
       } catch (error) {
         console.error('Failed to load cities:', error);
         setCities([]);
+        
+        toast({
+          variant: "destructive",
+          title: "Failed to Load Cities", 
+          description: `Unable to load cities for ${province}. Please try again or select a different state.`,
+        });
+        
+        // Remove problematic state from the list
+        setStates(prevStates => prevStates.filter(state => state.name !== province));
+        setProvince("");
       } finally {
         setIsLoadingLocations(false);
       }
@@ -163,7 +218,7 @@ export const SearchSection = ({ onSearch, isLoading = false }: SearchSectionProp
     if (!useAutoLocation && country && province) {
       loadCities();
     }
-  }, [province, country, useAutoLocation]);
+  }, [province, country, useAutoLocation, toast]);
 
   // Enhanced geolocation function
   const detectCurrentLocation = async () => {

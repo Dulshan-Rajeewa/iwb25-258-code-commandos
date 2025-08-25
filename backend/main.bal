@@ -933,20 +933,34 @@ service /api/v1 on httpListener {
                 
                 if statesResponse is http:Response && statesResponse.statusCode == 200 {
                     json|error apiData = statesResponse.getJsonPayload();
-                    if apiData is json {
-                        log:printInfo("Successfully fetched states from external API for: " + countryValue);
-                        http:Response res = new;
-                        res.setHeader("Access-Control-Allow-Origin", "*");
-                        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-                        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-                        res.setHeader("Content-Type", "application/json");
-                        res.setJsonPayload({
-                            success: true,
-                            data: apiData,
-                            message: "States fetched successfully from external API"
-                        });
-                        return res;
+                    if apiData is json && apiData is map<json> {
+                        // Check if we have states data
+                        anydata statesData = apiData["data"];
+                        if statesData is json && statesData is map<json> {
+                            anydata statesArray = statesData["states"];
+                            if statesArray is json[] && statesArray.length() > 0 {
+                                log:printInfo("Successfully fetched " + statesArray.length().toString() + " states from external API for: " + countryValue);
+                                http:Response res = new;
+                                res.setHeader("Access-Control-Allow-Origin", "*");
+                                res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                                res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                                res.setHeader("Content-Type", "application/json");
+                                res.setJsonPayload({
+                                    success: true,
+                                    data: apiData,
+                                    message: "States fetched successfully from external API"
+                                });
+                                return res;
+                            }
+                        }
+                        
+                        // If we got a response but no valid states, log and continue to fallback
+                        log:printInfo("External API returned data but no states found for: " + countryValue);
+                    } else {
+                        log:printInfo("External API response format invalid for: " + countryValue);
                     }
+                } else {
+                    log:printInfo("External API call failed with status: " + (statesResponse is http:Response ? statesResponse.statusCode.toString() : "error"));
                 }
                 
                 log:printInfo("External API failed or returned no data, using fallback data for: " + countryValue);

@@ -206,18 +206,13 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
           title: "Profile Updated",
           description: "Your pharmacy information has been saved successfully.",
         });
-        // Update local state with response data if available
-        if (response.pharmacy) {
-          setPharmacyInfo({
-            name: response.pharmacy.name || "",
-            address: response.pharmacy.address || "", // Only use address field
-            phone: response.pharmacy.phone || "",
-            email: response.pharmacy.email || "",
-            license_number: response.pharmacy.license_number || "",
-            profile_image: response.pharmacy.profile_image || "",
-            description: response.pharmacy.description || ""
-          });
-        }
+        // Always reload the latest profile info from backend to avoid empty form bug
+        setTimeout(() => {
+          loadPharmacyInfo();
+        }, 200);
+        setTimeout(() => {
+          setSuccessMessage("");
+        }, 3000);
       } else {
         const errorMessage = response.message || "Failed to update pharmacy information";
         setError(errorMessage);
