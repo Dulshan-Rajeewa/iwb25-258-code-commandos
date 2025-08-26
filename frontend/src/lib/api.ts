@@ -354,7 +354,8 @@ export const api = {
         category: medicine.category,
         price: medicine.price,
         stock: medicine.stockQuantity, // Transform stockQuantity to stock
-        status: "available"
+        status: "available",
+        imageUrl: medicine.imageUrl || undefined
       };
 
       const response = await fetch(`${API_BASE_URL}/medicines`, {
@@ -380,13 +381,24 @@ export const api = {
 
   updateMedicine: async (id: string, medicine: Omit<Medicine, 'id'>, token: string) => {
     try {
+      // Transform frontend Medicine interface to backend expected format
+      const backendMedicineData = {
+        name: medicine.name,
+        description: medicine.description,
+        category: medicine.category,
+        price: medicine.price,
+        stock: medicine.stockQuantity, // Transform stockQuantity to stock
+        status: medicine.status || "available",
+        imageUrl: medicine.imageUrl || undefined
+      };
+
       const response = await fetch(`${API_BASE_URL}/medicines/${id}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(medicine)
+        body: JSON.stringify(backendMedicineData)
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return await response.json();
@@ -402,7 +414,39 @@ export const api = {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      if (!response.ok) {
+        if (response.status === 0) {
+          throw new Error('Unable to connect to server. Please check if the backend is running.');
+        }
+        
+        if (response.status === 401) {
+          throw new Error('Your session has expired. Please log in again.');
+        }
+        
+        if (response.status === 404) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Medicine not found or access denied.');
+        }
+        
+        if (response.status === 500) {
+          try {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Server error occurred while deleting medicine.');
+          } catch {
+            throw new Error('Server error occurred. Please try again later.');
+          }
+        }
+        
+        // For any other HTTP error
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.message || `Delete failed with status ${response.status}`);
+        } catch {
+          throw new Error(`Network error occurred (Status: ${response.status})`);
+        }
+      }
+      
       return await response.json();
     } catch (error) {
       console.error('Delete medicine failed:', error);
@@ -565,6 +609,72 @@ export const api = {
       }
       
       throw new Error('An unexpected error occurred while uploading the image.');
+    }
+  },
+
+  // Upload medicine image (authenticated)
+  uploadMedicineImage: async (medicineId: string, imageUrl: string, token: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/uploadMedicineImage`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          medicine_id: medicineId,
+          image_url: imageUrl 
+        })
+      });
+      
+      if (!response.ok) {
+        if (response.status === 0) {
+          throw new Error('Unable to connect to server. Please check if the backend is running.');
+        }
+        
+        if (response.status === 401) {
+          throw new Error('Your session has expired. Please log in again.');
+        }
+        
+        if (response.status === 400) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Invalid request data.');
+        }
+        
+        if (response.status === 404) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Medicine not found or access denied.');
+        }
+        
+        if (response.status === 500) {
+          try {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Server error occurred while uploading medicine image.');
+          } catch {
+            throw new Error('Server error occurred. Please try again later.');
+          }
+        }
+        
+        // For any other HTTP error
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.message || `Upload failed with status ${response.status}`);
+        } catch {
+          throw new Error(`Network error occurred while uploading medicine image (Status: ${response.status})`);
+        }
+      }
+      
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      console.error('Upload medicine image failed:', error);
+      
+      // Re-throw with preserved error message
+      if (error instanceof Error) {
+        throw error;
+      }
+      
+      throw new Error('An unexpected error occurred while uploading the medicine image.');
     }
   },
 

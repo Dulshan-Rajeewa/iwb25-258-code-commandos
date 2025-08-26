@@ -13,7 +13,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { Plus, Edit, Trash2, LogOut, MapPin, Loader2, Save, X, RefreshCw, Menu, Camera, User, Settings, BarChart3, Package, Home } from "lucide-react";
+import { Plus, Edit, Trash2, LogOut, MapPin, Loader2, Save, X, RefreshCw, Menu, Camera, User, Settings, BarChart3, Package } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -75,6 +75,15 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
   
   const [isProfileImageUploading, setIsProfileImageUploading] = useState(false);
   const [profileImagePreview, setProfileImagePreview] = useState("");
+  const [isMedicineImageUploading, setIsMedicineImageUploading] = useState(false);
+  const [medicineImagePreview, setMedicineImagePreview] = useState("");
+
+  // Helper function to get safe values for editing medicine
+  const getEditingMedicineValue = (field: keyof Medicine, defaultValue: string = "") => {
+    if (!editingMedicine) return defaultValue;
+    const value = editingMedicine[field];
+    return value !== undefined && value !== null ? String(value) : defaultValue;
+  };
 
   // Get initials for avatar fallback
   const getInitials = (name: string) => {
@@ -347,6 +356,129 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
     }
   };
 
+  const handleMedicineImageUpload = async (event: React.ChangeEvent<HTMLInputElement>, medicineId?: string) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsMedicineImageUploading(true);
+
+      // Basic validation
+      if (!file.type.startsWith('image/')) {
+        toast({
+          title: "Invalid File",
+          description: "Please select a valid image file (JPG, PNG, GIF).",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        toast({
+          title: "File Too Large",
+          description: "Please select an image smaller than 5MB.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Convert to base64
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const base64String = e.target?.result as string;
+          
+          if (!base64String) {
+            throw new Error('Failed to read image file');
+          }
+
+          // If medicineId is provided, upload directly to that medicine
+          if (medicineId) {
+            const token = localStorage.getItem('authToken');
+            if (!token) {
+              toast({
+                title: "Authentication Error",
+                description: "Please log in again.",
+                variant: "destructive",
+              });
+              return;
+            }
+
+            const response = await api.uploadMedicineImage(medicineId, base64String, token);
+            
+            if (response.success) {
+              toast({
+                title: "Image Uploaded",
+                description: "Medicine image has been updated successfully.",
+              });
+
+              // Refresh medicines to show the new image
+              await loadMedicines();
+            } else {
+              throw new Error(response.message || 'Upload failed');
+            }
+          } else {
+            // For new medicine, just set the preview
+            setMedicineImagePreview(base64String);
+            setNewMedicine(prev => ({ ...prev, imageUrl: base64String }));
+            
+            toast({
+              title: "Image Selected",
+              description: "Image has been selected for the new medicine.",
+            });
+          }
+        } catch (error) {
+          console.error('Medicine image upload error:', error);
+          
+          let errorMessage = 'Failed to upload image. Please try again.';
+          
+          if (error instanceof Error) {
+            if (error.message.includes('connect') || error.message.includes('fetch')) {
+              errorMessage = 'Unable to connect to server. Please check your internet connection.';
+            } else if (error.message.includes('session') || error.message.includes('expired')) {
+              errorMessage = 'Your session has expired. Please log in again.';
+              localStorage.removeItem('authToken');
+              localStorage.removeItem('userType');
+            } else if (error.message.includes('large') || error.message.includes('size')) {
+              errorMessage = 'Image file is too large. Please select a smaller image.';
+            } else if (error.message.includes('format') || error.message.includes('type')) {
+              errorMessage = 'Unsupported image format. Please use JPG, PNG, or GIF.';
+            } else if (error.message) {
+              errorMessage = error.message;
+            }
+          }
+          
+          toast({
+            title: "Upload Failed",
+            description: errorMessage,
+            variant: "destructive",
+          });
+        } finally {
+          setIsMedicineImageUploading(false);
+        }
+      };
+
+      reader.onerror = () => {
+        toast({
+          title: "File Read Error",
+          description: "Failed to read the selected file. Please try again.",
+          variant: "destructive",
+        });
+        setIsMedicineImageUploading(false);
+      };
+
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('Medicine image upload error:', error);
+      toast({
+        title: "Upload Failed",
+        description: "Failed to upload image. Please try again.",
+        variant: "destructive",
+      });
+      setIsMedicineImageUploading(false);
+    }
+  };
+
   const getStatusBadge = (medicine: Medicine) => {
     // Use actual status from database if available, otherwise calculate from stock
     const actualStatus = medicine.status?.toLowerCase() || 'available';
@@ -407,7 +539,7 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
         pharmacyId: "", // Will be set by backend
         pharmacyName: "", // Will be set by backend
         location: "", // Will be set by backend
-        imageUrl: newMedicine.imageUrl || "https://example.com/default-medicine.jpg"
+        imageUrl: newMedicine.imageUrl || medicineImagePreview || ""
       };
 
       const response = await api.addMedicine(medicineData, token);
@@ -497,7 +629,7 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
         pharmacyId: editingMedicine.pharmacyId,
         pharmacyName: editingMedicine.pharmacyName,
         location: editingMedicine.location,
-        imageUrl: editingMedicine.imageUrl || "https://example.com/default-medicine.jpg",
+        imageUrl: editingMedicine.imageUrl || medicineImagePreview || "",
         isAvailable: editingMedicine.stockQuantity > 0
       };
 
@@ -535,6 +667,11 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
       const token = localStorage.getItem('authToken');
       if (!token) {
         setError('Authentication required. Please log in again.');
+        toast({
+          title: "Authentication Error",
+          description: "Please log in again to continue.",
+          variant: "destructive",
+        });
         return;
       }
 
@@ -542,15 +679,50 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
       
       if (response.success) {
         setSuccessMessage('Medicine deleted successfully!');
+        toast({
+          title: "Medicine Deleted",
+          description: `${medicineToDelete.name} has been removed from your inventory.`,
+        });
         await loadMedicines();
         setIsDeleteDialogOpen(false);
         setMedicineToDelete(null);
       } else {
-        setError(response.message || "Failed to delete medicine");
+        const errorMessage = response.message || "Failed to delete medicine";
+        setError(errorMessage);
+        toast({
+          title: "Delete Failed",
+          description: errorMessage,
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error('Delete medicine error:', error);
-      setError('Failed to delete medicine. Please try again.');
+      
+      // Extract meaningful error message
+      let errorMessage = 'Failed to delete medicine. Please try again.';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('connect') || error.message.includes('fetch')) {
+          errorMessage = 'Unable to connect to server. Please check your internet connection and try again.';
+        } else if (error.message.includes('session') || error.message.includes('expired')) {
+          errorMessage = 'Your session has expired. Please log in again.';
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('userType');
+        } else if (error.message.includes('not found') || error.message.includes('404')) {
+          errorMessage = 'Medicine not found or has already been deleted.';
+        } else if (error.message.includes('permission') || error.message.includes('access denied')) {
+          errorMessage = 'You do not have permission to delete this medicine.';
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+      }
+      
+      setError(errorMessage);
+      toast({
+        title: "Delete Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
@@ -848,74 +1020,138 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleAddMedicine} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="medicine-name">Medicine Name *</Label>
-                    <Input
-                      id="medicine-name"
-                      value={newMedicine.name}
-                      onChange={(e) => setNewMedicine({ ...newMedicine, name: e.target.value })}
-                      placeholder="e.g., Paracetamol 500mg"
-                      required
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="category">Category *</Label>
-                    <Select value={newMedicine.category} onValueChange={(value) => setNewMedicine({ ...newMedicine, category: value })}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select category" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Pain Relief">Pain Relief</SelectItem>
-                        <SelectItem value="Antibiotics">Antibiotics</SelectItem>
-                        <SelectItem value="Cardiovascular">Cardiovascular</SelectItem>
-                        <SelectItem value="Diabetes">Diabetes</SelectItem>
-                        <SelectItem value="Respiratory">Respiratory</SelectItem>
-                        <SelectItem value="Vitamins">Vitamins</SelectItem>
-                        <SelectItem value="Other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
+                <form onSubmit={handleAddMedicine} className="space-y-6">
+                  <div className="grid grid-cols-1 gap-4 sm:gap-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="medicine-name">Medicine Name *</Label>
+                        <Input
+                          id="medicine-name"
+                          value={newMedicine.name}
+                          onChange={(e) => setNewMedicine({ ...newMedicine, name: e.target.value })}
+                          placeholder="e.g., Paracetamol 500mg"
+                          required
+                          className="w-full"
+                        />
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="category">Category *</Label>
+                        <Select value={newMedicine.category} onValueChange={(value) => setNewMedicine({ ...newMedicine, category: value })}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Pain Relief">Pain Relief</SelectItem>
+                            <SelectItem value="Antibiotics">Antibiotics</SelectItem>
+                            <SelectItem value="Cardiovascular">Cardiovascular</SelectItem>
+                            <SelectItem value="Diabetes">Diabetes</SelectItem>
+                            <SelectItem value="Respiratory">Respiratory</SelectItem>
+                            <SelectItem value="Vitamins">Vitamins</SelectItem>
+                            <SelectItem value="Other">Other</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="price">Price ($) *</Label>
+                        <Input
+                          id="price"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={newMedicine.price}
+                          onChange={(e) => setNewMedicine({ ...newMedicine, price: e.target.value })}
+                          placeholder="0.00"
+                          required
+                          className="w-full"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="stock">Stock Quantity *</Label>
+                        <Input
+                          id="stock"
+                          type="number"
+                          min="0"
+                          value={newMedicine.stockQuantity}
+                          onChange={(e) => setNewMedicine({ ...newMedicine, stockQuantity: e.target.value })}
+                          placeholder="0"
+                          required
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="price">Price ($) *</Label>
-                    <Input
-                      id="price"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={newMedicine.price}
-                      onChange={(e) => setNewMedicine({ ...newMedicine, price: e.target.value })}
-                      placeholder="0.00"
-                      required
-                    />
+                  <div className="space-y-3">
+                    <Label htmlFor="image-url">Medicine Image</Label>
+                    <div className="space-y-4">
+                      {/* Image Preview */}
+                      {(newMedicine.imageUrl || medicineImagePreview) && (
+                        <div className="flex justify-center sm:justify-start">
+                          <div className="relative w-32 h-32 border-2 border-dashed border-border rounded-lg overflow-hidden">
+                            <img
+                              src={medicineImagePreview || newMedicine.imageUrl}
+                              alt="Medicine preview"
+                              className="w-full h-full object-cover"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="absolute top-1 right-1 h-6 w-6 p-0 bg-black/50 hover:bg-black/70 text-white"
+                              onClick={() => {
+                                setNewMedicine(prev => ({ ...prev, imageUrl: "" }));
+                                setMedicineImagePreview("");
+                              }}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Upload Button */}
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="hover:bg-medical-blue/10 hover:border-medical-blue/30 w-full sm:w-auto"
+                          onClick={() => document.getElementById('medicine-image-upload')?.click()}
+                          disabled={isMedicineImageUploading}
+                        >
+                          <Camera className="h-4 w-4 mr-2" />
+                          {isMedicineImageUploading ? 'Uploading...' : 'Upload Image'}
+                        </Button>
+                        
+                        <input
+                          id="medicine-image-upload"
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleMedicineImageUpload(e)}
+                          className="hidden"
+                        />
+                      </div>
+                      
+                      {/* Or URL Input */}
+                      <div className="space-y-2">
+                        <Label htmlFor="image-url" className="text-sm font-medium">Or enter image URL</Label>
+                        <Input
+                          id="image-url"
+                          value={newMedicine.imageUrl}
+                          onChange={(e) => setNewMedicine({ ...newMedicine, imageUrl: e.target.value })}
+                          placeholder="https://example.com/image.jpg"
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="stock">Stock Quantity *</Label>
-                    <Input
-                      id="stock"
-                      type="number"
-                      min="0"
-                      value={newMedicine.stockQuantity}
-                      onChange={(e) => setNewMedicine({ ...newMedicine, stockQuantity: e.target.value })}
-                      placeholder="0"
-                      required
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="image-url">Image URL</Label>
-                    <Input
-                      id="image-url"
-                      value={newMedicine.imageUrl}
-                      onChange={(e) => setNewMedicine({ ...newMedicine, imageUrl: e.target.value })}
-                      placeholder="https://example.com/image.jpg"
-                    />
-                  </div>
-
-                  <div className="space-y-2 md:col-span-2 lg:col-span-3">
+                  <div className="space-y-3">
                     <Label htmlFor="description">Description *</Label>
                     <Textarea
                       id="description"
@@ -923,11 +1159,12 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                       onChange={(e) => setNewMedicine({ ...newMedicine, description: e.target.value })}
                       placeholder="Medicine description, usage instructions, etc."
                       required
+                      className="min-h-[120px] w-full resize-none"
                     />
                   </div>
 
-                  <div className="md:col-span-2 lg:col-span-3">
-                    <Button type="submit" disabled={isLoading} className="w-full md:w-auto">
+                  <div className="pt-4 flex flex-col sm:flex-row gap-3">
+                    <Button type="submit" disabled={isLoading} className="w-full sm:w-auto px-8 py-2">
                       {isLoading ? (
                         <>
                           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -982,11 +1219,11 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="min-w-[150px]">Medicine Name</TableHead>
-                          <TableHead className="hidden sm:table-cell">Category</TableHead>
-                          <TableHead>Price</TableHead>
-                          <TableHead>Stock</TableHead>
-                          <TableHead>Status</TableHead>
+                          <TableHead className="min-w-[250px]">Medicine</TableHead>
+                          <TableHead className="hidden md:table-cell">Category</TableHead>
+                          <TableHead className="hidden sm:table-cell">Price</TableHead>
+                          <TableHead className="hidden sm:table-cell">Stock</TableHead>
+                          <TableHead className="hidden lg:table-cell">Status</TableHead>
                           <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -994,25 +1231,56 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                         {medicines.map((medicine) => (
                           <TableRow key={medicine.id}>
                             <TableCell className="font-medium">
-                              <div>
-                                <div className="font-medium">{medicine.name}</div>
-                                <div className="text-xs text-muted-foreground sm:hidden">
-                                  {medicine.category}
+                              <div className="flex items-center gap-3">
+                                {/* Medicine Image */}
+                                <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-border/50 flex-shrink-0">
+                                  {medicine.imageUrl ? (
+                                    <img
+                                      src={medicine.imageUrl}
+                                      alt={medicine.name}
+                                      className="w-full h-full object-cover"
+                                      onError={(e) => {
+                                        const target = e.target as HTMLImageElement;
+                                        target.src = "https://via.placeholder.com/48x48?text=Medicine";
+                                      }}
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full bg-gradient-to-br from-medical-blue/20 to-medical-green/20 flex items-center justify-center">
+                                      <Package className="h-5 w-5 text-muted-foreground" />
+                                    </div>
+                                  )}
+                                </div>
+                                
+                                {/* Medicine Info */}
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-medium truncate">{medicine.name}</div>
+                                  <div className="text-xs text-muted-foreground md:hidden">
+                                    {medicine.category} • ${medicine.price.toFixed(2)} • {medicine.stockQuantity || 0} in stock
+                                  </div>
+                                  <div className="text-xs text-muted-foreground hidden md:block lg:hidden">
+                                    ${medicine.price.toFixed(2)} • {medicine.stockQuantity || 0} in stock
+                                  </div>
+                                  {medicine.description && (
+                                    <div className="text-xs text-muted-foreground truncate max-w-[200px] hidden lg:block">
+                                      {medicine.description}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </TableCell>
-                            <TableCell className="hidden sm:table-cell">{medicine.category}</TableCell>
-                            <TableCell className="font-medium">${medicine.price.toFixed(2)}</TableCell>
-                            <TableCell className="font-medium">{medicine.stockQuantity || 0}</TableCell>
-                            <TableCell>{getStatusBadge(medicine)}</TableCell>
+                            <TableCell className="hidden md:table-cell">{medicine.category}</TableCell>
+                            <TableCell className="hidden sm:table-cell font-medium">${medicine.price.toFixed(2)}</TableCell>
+                            <TableCell className="hidden sm:table-cell font-medium">{medicine.stockQuantity || 0}</TableCell>
+                            <TableCell className="hidden lg:table-cell">{getStatusBadge(medicine)}</TableCell>
                             <TableCell className="text-right">
-                              <div className="flex gap-2 justify-end">
+                              <div className="flex gap-1 sm:gap-2 justify-end">
                                 <Button 
                                   variant="outline" 
                                   size="sm"
                                   onClick={() => handleEditMedicine(medicine)}
                                   disabled={isLoading}
-                                  className="h-8 w-8 p-0"
+                                  className="h-7 w-7 sm:h-8 sm:w-8 p-0 hover:bg-medical-blue/10 hover:border-medical-blue/30"
+                                  title="Edit Medicine"
                                 >
                                   <Edit className="h-3 w-3" />
                                 </Button>
@@ -1021,7 +1289,8 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                                   size="sm"
                                   onClick={() => handleDeleteClick(medicine)}
                                   disabled={isLoading}
-                                  className="h-8 w-8 p-0"
+                                  className="h-7 w-7 sm:h-8 sm:w-8 p-0 hover:bg-red-600/90"
+                                  title="Delete Medicine"
                                 >
                                   <Trash2 className="h-3 w-3" />
                                 </Button>
@@ -1452,7 +1721,7 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
 
       {/* Edit Medicine Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Medicine</DialogTitle>
             <DialogDescription>
@@ -1460,87 +1729,151 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
             </DialogDescription>
           </DialogHeader>
           {editingMedicine && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-medicine-name">Medicine Name *</Label>
-                <Input
-                  id="edit-medicine-name"
-                  value={editingMedicine.name}
-                  onChange={(e) => setEditingMedicine({ ...editingMedicine, name: e.target.value })}
-                  placeholder="e.g., Paracetamol 500mg"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="edit-category">Category *</Label>
-                <Select value={editingMedicine.category} onValueChange={(value) => setEditingMedicine({ ...editingMedicine, category: value })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Pain Relief">Pain Relief</SelectItem>
-                    <SelectItem value="Antibiotics">Antibiotics</SelectItem>
-                    <SelectItem value="Cardiovascular">Cardiovascular</SelectItem>
-                    <SelectItem value="Diabetes">Diabetes</SelectItem>
-                    <SelectItem value="Respiratory">Respiratory</SelectItem>
-                    <SelectItem value="Vitamins">Vitamins</SelectItem>
-                    <SelectItem value="Other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 sm:gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-name">Medicine Name *</Label>
+                    <Input
+                      id="edit-name"
+                      placeholder="Medicine name"
+                      value={getEditingMedicineValue('name')}
+                      onChange={(e) => setEditingMedicine(editingMedicine ? { ...editingMedicine, name: e.target.value } : null)}
+                      className="w-full"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-category">Category *</Label>
+                    <Select value={getEditingMedicineValue('category')} onValueChange={(value) => setEditingMedicine(editingMedicine ? { ...editingMedicine, category: value } : null)}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Pain Relief">Pain Relief</SelectItem>
+                        <SelectItem value="Antibiotics">Antibiotics</SelectItem>
+                        <SelectItem value="Cardiovascular">Cardiovascular</SelectItem>
+                        <SelectItem value="Diabetes">Diabetes</SelectItem>
+                        <SelectItem value="Respiratory">Respiratory</SelectItem>
+                        <SelectItem value="Vitamins">Vitamins</SelectItem>
+                        <SelectItem value="Other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-price">Price ($) *</Label>
+                    <Input
+                      id="edit-price"
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={getEditingMedicineValue('price')}
+                      onChange={(e) => setEditingMedicine(editingMedicine ? { ...editingMedicine, price: e.target.value } : null)}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-stock">Stock Quantity *</Label>
+                    <Input
+                      id="edit-stock"
+                      type="number"
+                      min="0"
+                      placeholder="0"
+                      value={getEditingMedicineValue('stockQuantity')}
+                      onChange={(e) => setEditingMedicine(editingMedicine ? { ...editingMedicine, stockQuantity: e.target.value } : null)}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="edit-price">Price ($) *</Label>
-                <Input
-                  id="edit-price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={editingMedicine.price}
-                  onChange={(e) => setEditingMedicine({ ...editingMedicine, price: parseFloat(e.target.value) || 0 })}
-                  placeholder="0.00"
-                />
+              <div className="space-y-3">
+                <Label htmlFor="edit-image-url">Medicine Image</Label>
+                <div className="space-y-4">
+                  {/* Image Preview */}
+                  {(editingMedicine.imageUrl || medicineImagePreview) && (
+                    <div className="flex justify-center sm:justify-start">
+                      <div className="relative w-32 h-32 border-2 border-dashed border-border rounded-lg overflow-hidden">
+                        <img
+                          src={medicineImagePreview || editingMedicine.imageUrl}
+                          alt="Medicine preview"
+                          className="w-full h-full object-cover"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute top-1 right-1 h-6 w-6 p-0 bg-black/50 hover:bg-black/70 text-white"
+                          onClick={() => {
+                            setEditingMedicine(prev => prev ? { ...prev, imageUrl: "" } : null);
+                            setMedicineImagePreview("");
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Upload Button */}
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="hover:bg-medical-blue/10 hover:border-medical-blue/30 w-full sm:w-auto"
+                      onClick={() => document.getElementById('edit-medicine-image-upload')?.click()}
+                      disabled={isMedicineImageUploading}
+                    >
+                      <Camera className="h-4 w-4 mr-2" />
+                      {isMedicineImageUploading ? 'Uploading...' : 'Upload Image'}
+                    </Button>
+                    
+                    <input
+                      id="edit-medicine-image-upload"
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleMedicineImageUpload(e, editingMedicine.id)}
+                      className="hidden"
+                    />
+                  </div>
+                  
+                  {/* Or URL Input */}
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-image-url" className="text-sm font-medium">Or enter image URL</Label>
+                    <Input
+                      id="edit-image-url"
+                      placeholder="https://example.com/image.jpg"
+                      value={getEditingMedicineValue('imageUrl')}
+                      onChange={(e) => setEditingMedicine(editingMedicine ? { ...editingMedicine, imageUrl: e.target.value } : null)}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="edit-stock">Stock Quantity *</Label>
-                <Input
-                  id="edit-stock"
-                  type="number"
-                  min="0"
-                  value={editingMedicine.stockQuantity}
-                  onChange={(e) => setEditingMedicine({ ...editingMedicine, stockQuantity: parseInt(e.target.value) || 0 })}
-                  placeholder="0"
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="edit-image-url">Image URL</Label>
-                <Input
-                  id="edit-image-url"
-                  value={editingMedicine.imageUrl}
-                  onChange={(e) => setEditingMedicine({ ...editingMedicine, imageUrl: e.target.value })}
-                  placeholder="https://example.com/image.jpg"
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
+              <div className="space-y-3">
                 <Label htmlFor="edit-description">Description *</Label>
                 <Textarea
                   id="edit-description"
-                  value={editingMedicine.description}
-                  onChange={(e) => setEditingMedicine({ ...editingMedicine, description: e.target.value })}
-                  placeholder="Medicine description, usage instructions, etc."
+                  placeholder="Medicine description"
+                  value={getEditingMedicineValue('description')}
+                  onChange={(e) => setEditingMedicine(editingMedicine ? { ...editingMedicine, description: e.target.value } : null)}
+                  className="min-h-[120px] w-full resize-none"
                 />
               </div>
             </div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+          <DialogFooter className="flex flex-col gap-3 sm:flex-row sm:gap-0">
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="w-full sm:w-auto order-2 sm:order-1">
               <X className="h-4 w-4 mr-2" />
               Cancel
             </Button>
-            <Button onClick={handleUpdateMedicine} disabled={isLoading}>
+            <Button onClick={handleUpdateMedicine} disabled={isLoading} className="w-full sm:w-auto order-1 sm:order-2">
               {isLoading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1559,18 +1892,18 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent>
+        <DialogContent className="w-[95vw] sm:w-full max-w-md">
           <DialogHeader>
             <DialogTitle>Delete Medicine</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete "{medicineToDelete?.name}"? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+          <DialogFooter className="flex flex-col gap-3 sm:flex-row sm:gap-0">
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="w-full sm:w-auto order-2 sm:order-1">
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleConfirmDelete} disabled={isLoading}>
+            <Button variant="destructive" onClick={handleConfirmDelete} disabled={isLoading} className="w-full sm:w-auto order-1 sm:order-2">
               {isLoading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />

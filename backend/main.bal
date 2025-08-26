@@ -90,6 +90,47 @@ service /api/v1 on httpListener {
         };
     }
 
+    // TEST ENDPOINT FOR DEBUGGING
+    resource function get test/connection() returns json|error {
+        log:printInfo("Testing Supabase connection...");
+        
+        http:Response response = check supabaseClient->get("/rest/v1/medicines?limit=1", {
+            "Authorization": "Bearer " + supabaseKey,
+            "apikey": supabaseKey,
+            "Content-Type": "application/json"
+        });
+        
+        log:printInfo("Supabase test response status: " + response.statusCode.toString());
+        
+        if response.statusCode == 200 {
+            json|error payload = response.getJsonPayload();
+            if payload is error {
+                map<json> errorResponse = {
+                    "success": false,
+                    "status": response.statusCode,
+                    "message": "Failed to parse response payload",
+                    "error": payload.message()
+                };
+                return errorResponse;
+            }
+            map<json> successResponse = {
+                "success": true,
+                "status": response.statusCode,
+                "message": "Supabase connection and medicines table access successful",
+                "data": payload
+            };
+            return successResponse;
+        } else {
+            map<json> errorResponse = {
+                "success": false,
+                "status": response.statusCode,
+                "message": "Supabase connection failed",
+                "error": "Status code: " + response.statusCode.toString()
+            };
+            return errorResponse;
+        }
+    }
+
     // DATABASE SETUP ENDPOINT - Creates tables and sample data
     resource function options setup(http:Request req) returns http:Response {
         http:Response res = new;
@@ -403,17 +444,69 @@ service /api/v1 on httpListener {
                 price = check float:fromString(priceValue);
             }
 
+            // Process description field
+            string description = "";
+            anydata descValue = medicineReq["description"];
+            if descValue is string {
+                description = descValue;
+            }
+
+            // Process category field
+            string category = "General";
+            anydata catValue = medicineReq["category"];
+            if catValue is string {
+                category = catValue;
+            }
+
+            // Process stock field
+            int stock = 0;
+            anydata stockValue = medicineReq["stock"];
+            if stockValue is int {
+                stock = stockValue;
+            } else if stockValue is string {
+                stock = check int:fromString(stockValue);
+            }
+
+            // Process status field
+            string status = "available";
+            anydata statusValue = medicineReq["status"];
+            if statusValue is string {
+                status = statusValue;
+            }
+
+            // Process manufacturer field
+            string manufacturer = "";
+            anydata manValue = medicineReq["manufacturer"];
+            if manValue is string {
+                manufacturer = manValue;
+            }
+
+            // Process expiry_date field
+            string? expiryDate = ();
+            anydata expValue = medicineReq["expiry_date"];
+            if expValue is string {
+                expiryDate = expValue;
+            }
+
+            // Process imageUrl field
+            string? imageUrl = ();
+            anydata imgValue = medicineReq["imageUrl"];
+            if imgValue is string {
+                imageUrl = imgValue;
+            }
+
             json medicine = {
                 "id": medicineId,
                 "name": medicineReq["name"],
                 "price": price,
-                "description": medicineReq["description"] ?: "",
-                "category": medicineReq["category"] ?: "General",
+                "description": description,
+                "category": category,
                 "pharmacy_id": pharmacyId,
-                "stock": medicineReq["stock"] ?: 0,
-                "status": medicineReq["status"] ?: "available",
-                "manufacturer": medicineReq["manufacturer"] ?: "",
-                "expiry_date": medicineReq["expiry_date"] ?: ()
+                "stock": stock,
+                "status": status,
+                "manufacturer": manufacturer,
+                "expiry_date": expiryDate,
+                "image_url": imageUrl
             };
 
             // Store in Supabase
@@ -450,6 +543,16 @@ service /api/v1 on httpListener {
         }
 
         return createErrorResponse(400, "Invalid medicine data");
+    }
+
+    // OPTIONS endpoint for individual medicine operations
+    resource function options medicines/[string medicineId](http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
     }
 
     resource function put medicines/[string medicineId](@http:Payload json medicineReq, http:Request req) returns http:Response|error {
@@ -497,6 +600,9 @@ service /api/v1 on httpListener {
             if medicineReq.hasKey("manufacturer") {
                 updateData["manufacturer"] = medicineReq["manufacturer"];
             }
+            if (medicineReq.hasKey("imageUrl")) {
+                updateData["image_url"] = medicineReq["imageUrl"];
+            }
 
             // Update in Supabase with pharmacy ownership check
             http:Response response = check supabaseClient->patch("/rest/v1/medicines?id=eq." + medicineId + "&pharmacy_id=eq." + pharmacyId, updateData, {
@@ -534,6 +640,193 @@ service /api/v1 on httpListener {
         }
 
         return createErrorResponse(400, "Invalid update data");
+    }
+
+    // DELETE MEDICINE ENDPOINT
+    resource function delete medicines/[string medicineId](http:Request req) returns http:Response|error {
+        string|http:HeaderNotFoundError authHeader = req.getHeader("Authorization");
+        string? pharmacyId = validateToken(authHeader is string ? authHeader : ());
+        
+        if pharmacyId is () {
+            return createErrorResponse(401, "Unauthorized access");
+        }
+
+        log:printInfo("Attempting to delete medicine: " + medicineId + " for pharmacy: " + pharmacyId);
+
+        // First verify the medicine belongs to this pharmacy
+        http:Response checkResponse = check supabaseClient->get("/rest/v1/medicines?id=eq." + medicineId + "&pharmacy_id=eq." + pharmacyId, {
+            "Authorization": "Bearer " + supabaseKey,
+            "apikey": supabaseKey,
+            "Content-Type": "application/json"
+        });
+
+        if checkResponse.statusCode != 200 {
+            log:printError("Failed to verify medicine ownership: " + checkResponse.statusCode.toString());
+            return createErrorResponse(404, "Medicine not found or access denied");
+        }
+
+        json medicines = check checkResponse.getJsonPayload();
+        if medicines is json[] && medicines.length() == 0 {
+            log:printError("Medicine not found or access denied for medicine: " + medicineId);
+            return createErrorResponse(404, "Medicine not found or access denied");
+        }
+
+        log:printInfo("Medicine ownership verified, proceeding with deletion");
+
+        // Delete from Supabase with pharmacy ownership check
+        log:printInfo("Attempting to delete medicine from Supabase: " + medicineId);
+        
+        http:Response response = check supabaseClient->delete("/rest/v1/medicines?id=eq." + medicineId + "&pharmacy_id=eq." + pharmacyId, {
+            "Authorization": "Bearer " + supabaseKey,
+            "apikey": supabaseKey,
+            "Content-Type": "application/json"
+        });
+
+        log:printInfo("Delete response status: " + response.statusCode.toString());
+
+        if response.statusCode != 200 && response.statusCode != 204 {
+            json|error errorPayload = response.getJsonPayload();
+            string errorMsg = "Unknown error";
+            if errorPayload is json {
+                errorMsg = errorPayload.toString();
+            } else if errorPayload is error {
+                errorMsg = errorPayload.message();
+            }
+            log:printError("Failed to delete medicine: " + errorMsg + " (Status: " + response.statusCode.toString() + ")");
+            return createErrorResponse(500, "Failed to delete medicine: " + errorMsg);
+        }
+
+        log:printInfo("Medicine deleted successfully: " + medicineId);
+
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.setHeader("Content-Type", "application/json");
+        res.setJsonPayload({
+            success: true,
+            message: "Medicine deleted successfully"
+        });
+        return res;
+    }
+
+    // UPLOAD MEDICINE IMAGE ENDPOINT
+    resource function options uploadMedicineImage(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    resource function post uploadMedicineImage(@http:Payload json imageReq, http:Request req) returns http:Response|error {
+        string|http:HeaderNotFoundError authHeader = req.getHeader("Authorization");
+        string? pharmacyId = validateToken(authHeader is string ? authHeader : ());
+        
+        if pharmacyId is () {
+            return createErrorResponse(401, "Unauthorized access");
+        }
+
+        log:printInfo("Received medicine image upload request: " + imageReq.toString());
+
+        if imageReq is map<json> {
+            // Check for both possible field names
+            anydata medicineIdValue = imageReq["medicine_id"];
+            anydata imageUrlValue = imageReq["image_url"];
+            
+            // If not found, try alternative field names
+            if medicineIdValue is () {
+                medicineIdValue = imageReq["medicineId"];
+            }
+            if imageUrlValue is () {
+                imageUrlValue = imageReq["imageUrl"];
+            }
+            
+            string medicineId = "";
+            string imageUrl = "";
+            
+            if medicineIdValue is string {
+                medicineId = medicineIdValue;
+            }
+            
+            if imageUrlValue is string {
+                imageUrl = imageUrlValue;
+            }
+            
+            log:printInfo("Processing image upload - Medicine ID: " + medicineId + ", Image URL length: " + imageUrl.length().toString());
+            
+            if medicineId == "" || imageUrl == "" {
+                return createErrorResponse(400, "Medicine ID and image URL are required");
+            }
+
+            // First verify the medicine belongs to this pharmacy
+            http:Response checkResponse = check supabaseClient->get("/rest/v1/medicines?id=eq." + medicineId + "&pharmacy_id=eq." + pharmacyId, {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json"
+            });
+
+            if checkResponse.statusCode != 200 {
+                log:printError("Failed to verify medicine ownership: " + checkResponse.statusCode.toString());
+                return createErrorResponse(404, "Medicine not found or access denied");
+            }
+
+            json medicines = check checkResponse.getJsonPayload();
+            if medicines is json[] && medicines.length() == 0 {
+                return createErrorResponse(404, "Medicine not found or access denied");
+            }
+
+            // Update medicine with image URL in Supabase
+            map<json> updateData = {
+                "image_url": imageUrl
+            };
+
+            log:printInfo("Updating medicine " + medicineId + " with image URL");
+
+            http:Response response = check supabaseClient->patch("/rest/v1/medicines?id=eq." + medicineId + "&pharmacy_id=eq." + pharmacyId, updateData, {
+                "Authorization": "Bearer " + supabaseKey,
+                "apikey": supabaseKey,
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
+            });
+
+            log:printInfo("Update response status: " + response.statusCode.toString());
+
+            if response.statusCode != 200 {
+                json|error errorPayload = response.getJsonPayload();
+                string errorMsg = "Unknown error";
+                if errorPayload is json {
+                    errorMsg = errorPayload.toString();
+                } else if errorPayload is error {
+                    errorMsg = errorPayload.message();
+                }
+                log:printError("Failed to update medicine image: " + errorMsg + " (Status: " + response.statusCode.toString() + ")");
+                return createErrorResponse(500, "Failed to upload medicine image: " + errorMsg);
+            }
+
+            json|error updatedMedicine = response.getJsonPayload();
+            if updatedMedicine is error {
+                log:printError("Failed to parse updated medicine: " + updatedMedicine.message());
+                return createErrorResponse(500, "Image upload successful but failed to retrieve updated data");
+            }
+
+            log:printInfo("Medicine image uploaded successfully for medicine: " + medicineId);
+
+            http:Response res = new;
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+            res.setHeader("Content-Type", "application/json");
+            res.setJsonPayload({
+                success: true,
+                medicine: updatedMedicine,
+                message: "Medicine image uploaded successfully"
+            });
+            return res;
+        }
+
+        return createErrorResponse(400, "Invalid image data");
     }
 
     // ANALYTICS ENDPOINT
@@ -1886,6 +2179,7 @@ service /api/v1 on httpListener {
 
         return createErrorResponse(400, "Invalid settings data");
     }
+
 }
 
 // UTILITY FUNCTIONS

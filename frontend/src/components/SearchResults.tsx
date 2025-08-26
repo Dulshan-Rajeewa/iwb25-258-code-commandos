@@ -222,13 +222,35 @@ export const SearchResults = ({ medicine, location, results, isLoading }: Search
                     <CardHeader className="pb-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
-                          <CardTitle className="text-xl group-hover:text-medical-blue transition-colors duration-300 truncate">
-                            {result.name}
-                          </CardTitle>
-                          <CardDescription className="flex items-center gap-2 mt-1">
-                            <Shield className="w-4 h-4 text-medical-blue" />
-                            {pharmacyData.name}
-                          </CardDescription>
+                          {/* Medicine Image and Name */}
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="relative w-16 h-16 rounded-lg overflow-hidden border border-border/50 flex-shrink-0">
+                              {result.imageUrl ? (
+                                <img
+                                  src={result.imageUrl}
+                                  alt={result.name}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    const target = e.target as HTMLImageElement;
+                                    target.src = "https://via.placeholder.com/64x64?text=Medicine";
+                                  }}
+                                />
+                              ) : (
+                                <div className="w-full h-full bg-gradient-to-br from-medical-blue/20 to-medical-green/20 flex items-center justify-center">
+                                  <Package className="h-6 w-6 text-muted-foreground" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <CardTitle className="text-xl group-hover:text-medical-blue transition-colors duration-300 truncate">
+                                {result.name}
+                              </CardTitle>
+                              <CardDescription className="flex items-center gap-2 mt-1">
+                                <Shield className="w-4 h-4 text-medical-blue" />
+                                {pharmacyData.name}
+                              </CardDescription>
+                            </div>
+                          </div>
                         </div>
                         <div className={cn(
                           "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border",

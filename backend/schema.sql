@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS medicines (
     status TEXT DEFAULT 'available',
     manufacturer TEXT,
     expiry_date TEXT,
+    image_url TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
