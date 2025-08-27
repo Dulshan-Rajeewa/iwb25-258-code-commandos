@@ -24,7 +24,7 @@
 				"run"
 			],
 			"options": {
-				"cwd": "${workspaceFolder}/backend/medi_find_backend"
+				"cwd": "${workspaceFolder}/backend"
 			},
 			"group": "build",
 			"isBackground": true,

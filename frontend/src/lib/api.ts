@@ -213,7 +213,22 @@ export const api = {
         body: JSON.stringify({ medicineName, location })
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
+      const data = await response.json();
+
+      // Normalize the medicines data to ensure consistent field names
+      if (data.medicines && Array.isArray(data.medicines)) {
+        data.medicines = data.medicines.map((medicine: Record<string, unknown>) => ({
+          ...medicine,
+          stockQuantity: (medicine.stock as number) || (medicine.stockQuantity as number) || 0,
+          status: (medicine.status as string) || 'available',
+          category: (medicine.category as string) || 'General',
+          imageUrl: (medicine.image_url as string) || (medicine.imageUrl as string) || "", // Map image_url to imageUrl
+          pharmacyId: (medicine.pharmacy_id as string) || (medicine.pharmacyId as string) || "",
+          pharmacyName: (medicine.pharmacy_name as string) || (medicine.pharmacyName as string) || ""
+        } as Medicine));
+      }
+
+      return data;
     } catch (error) {
       console.error('Search failed:', error);
       throw error;
@@ -232,12 +247,15 @@ export const api = {
       
       // Normalize the medicines data to ensure consistent field names
       if (data.medicines && Array.isArray(data.medicines)) {
-        data.medicines = data.medicines.map((medicine: Medicine & { stock?: number }) => ({
+        data.medicines = data.medicines.map((medicine: Record<string, unknown>) => ({
           ...medicine,
-          stockQuantity: medicine.stock || medicine.stockQuantity || 0,
-          status: medicine.status || 'available',
-          category: medicine.category || 'General'
-        }));
+          stockQuantity: (medicine.stock as number) || (medicine.stockQuantity as number) || 0,
+          status: (medicine.status as string) || 'available',
+          category: (medicine.category as string) || 'General',
+          imageUrl: (medicine.image_url as string) || (medicine.imageUrl as string) || "", // Map image_url to imageUrl
+          pharmacyId: (medicine.pharmacy_id as string) || (medicine.pharmacyId as string) || "",
+          pharmacyName: (medicine.pharmacy_name as string) || (medicine.pharmacyName as string) || ""
+        } as Medicine));
       }
       
       return data;
@@ -355,7 +373,7 @@ export const api = {
         price: medicine.price,
         stock: medicine.stockQuantity, // Transform stockQuantity to stock
         status: "available",
-        imageUrl: medicine.imageUrl || undefined
+        image_url: medicine.imageUrl || undefined // Send as image_url to match backend
       };
 
       const response = await fetch(`${API_BASE_URL}/medicines`, {
@@ -389,7 +407,7 @@ export const api = {
         price: medicine.price,
         stock: medicine.stockQuantity, // Transform stockQuantity to stock
         status: medicine.status || "available",
-        imageUrl: medicine.imageUrl || undefined
+        image_url: medicine.imageUrl || undefined // Send as image_url to match backend
       };
 
       const response = await fetch(`${API_BASE_URL}/medicines/${id}`, {

@@ -232,7 +232,9 @@ export const SearchResults = ({ medicine, location, results, isLoading }: Search
                                   className="w-full h-full object-cover"
                                   onError={(e) => {
                                     const target = e.target as HTMLImageElement;
-                                    target.src = "https://via.placeholder.com/64x64?text=Medicine";
+                                    // Use a data URI for a simple placeholder to avoid network requests
+                                    target.src = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik0xNiAxNkg0OFY0OEgxNlYxNloiIGZpbGw9IiNFNUU3RUIiLz4KPHBhdGggZD0iTTIyIDIySDQyVjI4SDIyVjIyWiIgZmlsbD0iIzk0QTNCRiIvPgo8cGF0aCBkPSJNMjIgMzJIMzZWMzhIMjJWMzJaIiBmaWxsPSIjOTRBM0JGIi8+CjxwYXRoIGQ9Ik0yMiAzOEgzMFY0NEgyMlYzOFoiIGZpbGw9IiM5NEEzQkYiLz4KPC9zdmc+";
+                                    target.onerror = null; // Prevent infinite loop
                                   }}
                                 />
                               ) : (
@@ -242,13 +244,13 @@ export const SearchResults = ({ medicine, location, results, isLoading }: Search
                               )}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <CardTitle className="text-xl group-hover:text-medical-blue transition-colors duration-300 truncate">
-                                {result.name}
-                              </CardTitle>
-                              <CardDescription className="flex items-center gap-2 mt-1">
-                                <Shield className="w-4 h-4 text-medical-blue" />
-                                {pharmacyData.name}
-                              </CardDescription>
+                          <CardTitle className="text-xl group-hover:text-medical-blue transition-colors duration-300 truncate">
+                            {result.name}
+                          </CardTitle>
+                          <CardDescription className="flex items-center gap-2 mt-1">
+                            <Shield className="w-4 h-4 text-medical-blue" />
+                            {pharmacyData.name}
+                          </CardDescription>
                             </div>
                           </div>
                         </div>

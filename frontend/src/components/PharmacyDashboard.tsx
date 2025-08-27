@@ -85,6 +85,18 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
     return value !== undefined && value !== null ? String(value) : defaultValue;
   };
 
+  // Helper function to get numeric values for editing medicine
+  const getEditingMedicineNumberValue = (field: keyof Medicine, defaultValue: number = 0) => {
+    if (!editingMedicine) return defaultValue;
+    const value = editingMedicine[field];
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const parsed = parseFloat(value);
+      return isNaN(parsed) ? defaultValue : parsed;
+    }
+    return defaultValue;
+  };
+
   // Get initials for avatar fallback
   const getInitials = (name: string) => {
     return name
@@ -362,6 +374,12 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
 
     try {
       setIsMedicineImageUploading(true);
+      
+      // Show loading toast
+      toast({
+        title: "Uploading Image",
+        description: "Please wait while we upload your image...",
+      });
 
       // Basic validation
       if (!file.type.startsWith('image/')) {
@@ -373,10 +391,10 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
         return;
       }
 
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+      if (file.size > 2 * 1024 * 1024) { // 2MB limit for better performance
         toast({
           title: "File Too Large",
-          description: "Please select an image smaller than 5MB.",
+          description: "Please select an image smaller than 2MB for better performance.",
           variant: "destructive",
         });
         return;
@@ -414,6 +432,22 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
 
               // Refresh medicines to show the new image
               await loadMedicines();
+              
+              // Clear the image preview if it was set
+              setMedicineImagePreview("");
+              
+              // Close any open edit dialogs
+              if (editingMedicine) {
+                setEditingMedicine(null);
+                setIsEditDialogOpen(false);
+              }
+              
+              // Clear the file input
+              const fileInput = document.getElementById('medicine-image-upload') as HTMLInputElement;
+              if (fileInput) fileInput.value = '';
+              
+              const editFileInput = document.getElementById('edit-medicine-image-upload') as HTMLInputElement;
+              if (editFileInput) editFileInput.value = '';
             } else {
               throw new Error(response.message || 'Upload failed');
             }
@@ -443,6 +477,16 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
               errorMessage = 'Image file is too large. Please select a smaller image.';
             } else if (error.message.includes('format') || error.message.includes('type')) {
               errorMessage = 'Unsupported image format. Please use JPG, PNG, or GIF.';
+            } else if (error.message.includes('500') || error.message.includes('Internal Server Error')) {
+              errorMessage = 'Server error occurred. Please try again later or contact support.';
+            } else if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+              errorMessage = 'Authentication failed. Please log in again.';
+              localStorage.removeItem('authToken');
+              localStorage.removeItem('userType');
+            } else if (error.message.includes('404') || error.message.includes('Not Found')) {
+              errorMessage = 'Medicine not found. Please refresh the page and try again.';
+            } else if (error.message.includes('Server error occurred')) {
+              errorMessage = 'Server error occurred. Please try again later or contact support.';
             } else if (error.message) {
               errorMessage = error.message;
             }
@@ -712,6 +756,12 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
           errorMessage = 'Medicine not found or has already been deleted.';
         } else if (error.message.includes('permission') || error.message.includes('access denied')) {
           errorMessage = 'You do not have permission to delete this medicine.';
+        } else if (error.message.includes('500') || error.message.includes('Internal Server Error')) {
+          errorMessage = 'Server error occurred. Please try again later or contact support.';
+        } else if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+          errorMessage = 'Authentication failed. Please log in again.';
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('userType');
         } else if (error.message) {
           errorMessage = error.message;
         }
@@ -1023,65 +1073,65 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                 <form onSubmit={handleAddMedicine} className="space-y-6">
                   <div className="grid grid-cols-1 gap-4 sm:gap-6">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                      <div className="space-y-2">
-                        <Label htmlFor="medicine-name">Medicine Name *</Label>
-                        <Input
-                          id="medicine-name"
-                          value={newMedicine.name}
-                          onChange={(e) => setNewMedicine({ ...newMedicine, name: e.target.value })}
-                          placeholder="e.g., Paracetamol 500mg"
-                          required
+                  <div className="space-y-2">
+                    <Label htmlFor="medicine-name">Medicine Name *</Label>
+                    <Input
+                      id="medicine-name"
+                      value={newMedicine.name}
+                      onChange={(e) => setNewMedicine({ ...newMedicine, name: e.target.value })}
+                      placeholder="e.g., Paracetamol 500mg"
+                      required
                           className="w-full"
-                        />
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <Label htmlFor="category">Category *</Label>
-                        <Select value={newMedicine.category} onValueChange={(value) => setNewMedicine({ ...newMedicine, category: value })}>
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="category">Category *</Label>
+                    <Select value={newMedicine.category} onValueChange={(value) => setNewMedicine({ ...newMedicine, category: value })}>
                           <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Select category" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Pain Relief">Pain Relief</SelectItem>
-                            <SelectItem value="Antibiotics">Antibiotics</SelectItem>
-                            <SelectItem value="Cardiovascular">Cardiovascular</SelectItem>
-                            <SelectItem value="Diabetes">Diabetes</SelectItem>
-                            <SelectItem value="Respiratory">Respiratory</SelectItem>
-                            <SelectItem value="Vitamins">Vitamins</SelectItem>
-                            <SelectItem value="Other">Other</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <SelectValue placeholder="Select category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Pain Relief">Pain Relief</SelectItem>
+                        <SelectItem value="Antibiotics">Antibiotics</SelectItem>
+                        <SelectItem value="Cardiovascular">Cardiovascular</SelectItem>
+                        <SelectItem value="Diabetes">Diabetes</SelectItem>
+                        <SelectItem value="Respiratory">Respiratory</SelectItem>
+                        <SelectItem value="Vitamins">Vitamins</SelectItem>
+                        <SelectItem value="Other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
                       </div>
-                    </div>
+                  </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                      <div className="space-y-2">
-                        <Label htmlFor="price">Price ($) *</Label>
-                        <Input
-                          id="price"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={newMedicine.price}
-                          onChange={(e) => setNewMedicine({ ...newMedicine, price: e.target.value })}
-                          placeholder="0.00"
-                          required
+                  <div className="space-y-2">
+                    <Label htmlFor="price">Price ($) *</Label>
+                    <Input
+                      id="price"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={newMedicine.price}
+                      onChange={(e) => setNewMedicine({ ...newMedicine, price: e.target.value })}
+                      placeholder="0.00"
+                      required
                           className="w-full"
-                        />
-                      </div>
+                    />
+                  </div>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="stock">Stock Quantity *</Label>
-                        <Input
-                          id="stock"
-                          type="number"
-                          min="0"
-                          value={newMedicine.stockQuantity}
-                          onChange={(e) => setNewMedicine({ ...newMedicine, stockQuantity: e.target.value })}
-                          placeholder="0"
-                          required
+                  <div className="space-y-2">
+                    <Label htmlFor="stock">Stock Quantity *</Label>
+                    <Input
+                      id="stock"
+                      type="number"
+                      min="0"
+                      value={newMedicine.stockQuantity}
+                      onChange={(e) => setNewMedicine({ ...newMedicine, stockQuantity: e.target.value })}
+                      placeholder="0"
+                      required
                           className="w-full"
-                        />
+                    />
                       </div>
                     </div>
                   </div>
@@ -1138,15 +1188,15 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                       </div>
                       
                       {/* Or URL Input */}
-                      <div className="space-y-2">
+                  <div className="space-y-2">
                         <Label htmlFor="image-url" className="text-sm font-medium">Or enter image URL</Label>
-                        <Input
-                          id="image-url"
-                          value={newMedicine.imageUrl}
-                          onChange={(e) => setNewMedicine({ ...newMedicine, imageUrl: e.target.value })}
-                          placeholder="https://example.com/image.jpg"
+                    <Input
+                      id="image-url"
+                      value={newMedicine.imageUrl}
+                      onChange={(e) => setNewMedicine({ ...newMedicine, imageUrl: e.target.value })}
+                      placeholder="https://example.com/image.jpg"
                           className="w-full"
-                        />
+                    />
                       </div>
                     </div>
                   </div>
@@ -1241,7 +1291,9 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                                       className="w-full h-full object-cover"
                                       onError={(e) => {
                                         const target = e.target as HTMLImageElement;
-                                        target.src = "https://via.placeholder.com/48x48?text=Medicine";
+                                        // Use a data URI for a simple placeholder to avoid network requests
+                                        target.src = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjQ4IiBoZWlnaHQ9IjQ4IiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik0xMiAxMkgzNlYzNkgxMlYxMloiIGZpbGw9IiNFNUU3RUIiLz4KPHBhdGggZD0iTTE2IDE2SDMyVjIwSDE2VjE2WiIgZmlsbD0iIzk0QTNCRiIvPgo8cGF0aCBkPSJNMTYgMjJIMzJWMjZIMTZWMjJaIiBmaWxsPSIjOTRBM0JGIi8+CjxwYXRoIGQ9Ik0xNiAyOEgyOFYzMkgxNlYyOFoiIGZpbGw9IiM5NEEzQkYiLz4KPC9zdmc+";
+                                        target.onerror = null; // Prevent infinite loop
                                       }}
                                     />
                                   ) : (
@@ -1732,61 +1784,61 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
             <div className="space-y-6">
               <div className="grid grid-cols-1 gap-4 sm:gap-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                  <div className="space-y-2">
+              <div className="space-y-2">
                     <Label htmlFor="edit-name">Medicine Name *</Label>
-                    <Input
+                <Input
                       id="edit-name"
                       placeholder="Medicine name"
                       value={getEditingMedicineValue('name')}
                       onChange={(e) => setEditingMedicine(editingMedicine ? { ...editingMedicine, name: e.target.value } : null)}
                       className="w-full"
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-category">Category *</Label>
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit-category">Category *</Label>
                     <Select value={getEditingMedicineValue('category')} onValueChange={(value) => setEditingMedicine(editingMedicine ? { ...editingMedicine, category: value } : null)}>
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select category" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Pain Relief">Pain Relief</SelectItem>
-                        <SelectItem value="Antibiotics">Antibiotics</SelectItem>
-                        <SelectItem value="Cardiovascular">Cardiovascular</SelectItem>
-                        <SelectItem value="Diabetes">Diabetes</SelectItem>
-                        <SelectItem value="Respiratory">Respiratory</SelectItem>
-                        <SelectItem value="Vitamins">Vitamins</SelectItem>
-                        <SelectItem value="Other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Pain Relief">Pain Relief</SelectItem>
+                    <SelectItem value="Antibiotics">Antibiotics</SelectItem>
+                    <SelectItem value="Cardiovascular">Cardiovascular</SelectItem>
+                    <SelectItem value="Diabetes">Diabetes</SelectItem>
+                    <SelectItem value="Respiratory">Respiratory</SelectItem>
+                    <SelectItem value="Vitamins">Vitamins</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
                   </div>
-                </div>
+              </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-price">Price ($) *</Label>
-                    <Input
-                      id="edit-price"
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
-                      value={getEditingMedicineValue('price')}
-                      onChange={(e) => setEditingMedicine(editingMedicine ? { ...editingMedicine, price: e.target.value } : null)}
+              <div className="space-y-2">
+                <Label htmlFor="edit-price">Price ($) *</Label>
+                <Input
+                  id="edit-price"
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                      value={getEditingMedicineNumberValue('price', 0).toString()}
+                      onChange={(e) => setEditingMedicine(editingMedicine ? { ...editingMedicine, price: parseFloat(e.target.value) || 0 } : null)}
                       className="w-full"
-                    />
-                  </div>
+                />
+              </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-stock">Stock Quantity *</Label>
-                    <Input
-                      id="edit-stock"
-                      type="number"
-                      min="0"
-                      placeholder="0"
-                      value={getEditingMedicineValue('stockQuantity')}
-                      onChange={(e) => setEditingMedicine(editingMedicine ? { ...editingMedicine, stockQuantity: e.target.value } : null)}
+              <div className="space-y-2">
+                <Label htmlFor="edit-stock">Stock Quantity *</Label>
+                <Input
+                  id="edit-stock"
+                  type="number"
+                  min="0"
+                  placeholder="0"
+                      value={getEditingMedicineNumberValue('stockQuantity', 0).toString()}
+                      onChange={(e) => setEditingMedicine(editingMedicine ? { ...editingMedicine, stockQuantity: parseInt(e.target.value) || 0 } : null)}
                       className="w-full"
-                    />
+                />
                   </div>
                 </div>
               </div>
@@ -1845,13 +1897,13 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                   {/* Or URL Input */}
                   <div className="space-y-2">
                     <Label htmlFor="edit-image-url" className="text-sm font-medium">Or enter image URL</Label>
-                    <Input
-                      id="edit-image-url"
-                      placeholder="https://example.com/image.jpg"
+                <Input
+                  id="edit-image-url"
+                  placeholder="https://example.com/image.jpg"
                       value={getEditingMedicineValue('imageUrl')}
                       onChange={(e) => setEditingMedicine(editingMedicine ? { ...editingMedicine, imageUrl: e.target.value } : null)}
                       className="w-full"
-                    />
+                />
                   </div>
                 </div>
               </div>
