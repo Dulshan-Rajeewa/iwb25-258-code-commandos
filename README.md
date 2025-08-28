@@ -4,7 +4,7 @@ A comprehensive medicine finder application that helps users locate medicines an
 
 ## 📋 Table of Contents
 
-- [Features](#Features)
+- [Features](#features)
 - [Tech Stack](#tech-stack)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
