@@ -19,7 +19,6 @@ export interface RegisterData {
   province?: string;
   country?: string;
 }
-
 // Medicine interface
 export interface Medicine {
   id: string;
@@ -414,7 +413,7 @@ export const api = {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify(backendMedicineData)
       });
@@ -424,9 +423,7 @@ export const api = {
       console.error('Update medicine failed:', error);
       throw error;
     }
-  },
-
-  deleteMedicine: async (id: string, token: string) => {
+  },  deleteMedicine: async (id: string, token: string) => {
     try {
       const response = await fetch(`${API_BASE_URL}/medicines/${id}`, {
         method: 'DELETE',
@@ -641,7 +638,7 @@ export const api = {
         },
         body: JSON.stringify({ 
           medicine_id: medicineId,
-          image_url: imageUrl 
+          image_data: imageUrl 
         })
       });
       
@@ -829,6 +826,20 @@ export const api = {
       
       const result = await response.json();
       console.log('✅ API Response:', result);
+
+      // Normalize the medicines data to ensure consistent field names
+      if (result.medicines && Array.isArray(result.medicines)) {
+        result.medicines = result.medicines.map((medicine: Record<string, unknown>) => ({
+          ...medicine,
+          stockQuantity: (medicine.stock as number) || (medicine.stockQuantity as number) || 0,
+          status: (medicine.status as string) || 'available',
+          category: (medicine.category as string) || 'General',
+          imageUrl: (medicine.image_url as string) || (medicine.imageUrl as string) || "", // Map image_url to imageUrl
+          pharmacyId: (medicine.pharmacy_id as string) || (medicine.pharmacyId as string) || "",
+          pharmacyName: (medicine.pharmacy_name as string) || (medicine.pharmacyName as string) || ""
+        } as Medicine));
+      }
+
       return result;
     } catch (error) {
       console.error('💥 Location-based search failed:', error);

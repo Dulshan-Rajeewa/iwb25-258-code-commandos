@@ -9,7 +9,7 @@ configurable string supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3Mi
 configurable string countriesApiKey = "NbbEYeZKCdhqG4nmyzcfUHchbhsANAif8kovpiSq";
 
 http:Client supabaseClient = check new (supabaseUrl, {
-    timeout: 30,
+    timeout: 60,
     httpVersion: http:HTTP_1_1,
     followRedirects: {enabled: true, maxCount: 5},
     secureSocket: {
@@ -223,6 +223,51 @@ service /api/v1 on httpListener {
             pharmacyCreated: pharmacyResponse is http:Response,
             medicinesCreated: medicinesCreated,
             note: "You can now login with demo@pharmacy.com / demo123"
+        };
+    }
+
+    // DATABASE MIGRATION ENDPOINT - Fixes database issues for image storage
+    resource function options migrate(http:Request req) returns http:Response {
+        http:Response res = new;
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.statusCode = 204;
+        return res;
+    }
+
+    resource function post migrate() returns json|error {
+        log:printInfo("Starting database migration for image storage fixes...");
+
+        // Note: Since we're using Supabase, we need to run these commands manually in the Supabase dashboard
+        // or through the Supabase CLI. This endpoint provides the SQL commands that need to be run.
+
+        string[] sqlCommands = [
+            "DROP INDEX IF EXISTS idx_medicines_image_url;",
+            "ALTER TABLE medicines DROP CONSTRAINT IF EXISTS check_image_url;",
+            "COMMENT ON COLUMN medicines.image_url IS 'Stores base64 encoded images or image URLs';"
+        ];
+
+        log:printInfo("Migration SQL commands that need to be run manually in Supabase:");
+        foreach string sql in sqlCommands {
+            log:printInfo("SQL: " + sql);
+        }
+
+        // Try to test if the index still exists by attempting a simple query
+        http:Response testResponse = check supabaseClient->get("/rest/v1/medicines?select=id,image_url&limit=1", {
+            "Authorization": "Bearer " + supabaseKey,
+            "apikey": supabaseKey,
+            "Content-Type": "application/json"
+        });
+
+        boolean canAccessImageUrl = testResponse.statusCode == 200;
+
+        return {
+            success: true,
+            message: "Migration information provided. Please run the SQL commands manually in Supabase dashboard.",
+            sqlCommands: sqlCommands,
+            note: "Go to your Supabase dashboard > SQL Editor and run these commands to fix the image storage issues.",
+            imageUrlColumnAccessible: canAccessImageUrl
         };
     }
 
@@ -537,6 +582,13 @@ service /api/v1 on httpListener {
             if imgValue is string {
                 imageUrl = imgValue;
             }
+            // Also check for image_url (frontend might send this)
+            if imageUrl is () {
+                anydata imgUrlValue = medicineReq["image_url"];
+                if imgUrlValue is string {
+                    imageUrl = imgUrlValue;
+                }
+            }
 
             json medicine = {
                 "id": medicineId,
@@ -647,6 +699,9 @@ service /api/v1 on httpListener {
             }
             if (medicineReq.hasKey("imageUrl")) {
                 updateData["image_url"] = medicineReq["imageUrl"];
+            }
+            if (medicineReq.hasKey("image_url")) {
+                updateData["image_url"] = medicineReq["image_url"];
             }
 
             // Update in Supabase with pharmacy ownership check
@@ -771,7 +826,7 @@ service /api/v1 on httpListener {
         return res;
     }
 
-    resource function post uploadMedicineImage(@http:Payload json imageReq, http:Request req) returns http:Response|error {
+    resource function post uploadMedicineImage(http:Request req) returns http:Response|error {
         log:printInfo("=== UPLOAD MEDICINE IMAGE START ===");
 
         string|http:HeaderNotFoundError authHeader = req.getHeader("Authorization");
@@ -785,100 +840,81 @@ service /api/v1 on httpListener {
             return createErrorResponse(401, "Unauthorized access");
         }
 
-        log:printInfo("Received medicine image upload request: " + imageReq.toString());
+        // Get the image data from request body
+        json|error payload = req.getJsonPayload();
+        if payload is error {
+            log:printError("Failed to parse request payload: " + payload.message());
+            return createErrorResponse(400, "Invalid request data");
+        }
 
-        if imageReq is map<json> {
-            // Check for both possible field names
-            anydata medicineIdValue = imageReq["medicine_id"];
-            anydata imageDataValue = imageReq["image_url"];
+        log:printInfo("Received payload: " + payload.toString());
 
-            // If not found, try alternative field names
-            if medicineIdValue is () {
-                medicineIdValue = imageReq["medicineId"];
-            }
-            if imageDataValue is () {
-                imageDataValue = imageReq["imageUrl"];
-            }
-
-            string medicineId = "";
-            string imageData = "";
-
-            if medicineIdValue is string {
-                medicineId = medicineIdValue;
-            }
-
-            if imageDataValue is string {
-                imageData = imageDataValue;
-            }
+        if payload is map<json> && payload.hasKey("medicine_id") && payload.hasKey("image_data") {
+            string medicineId = payload["medicine_id"].toString();
+            string imageData = payload["image_data"].toString();
 
             log:printInfo("Parsed data - Medicine ID: '" + medicineId + "', Image data length: " + imageData.length().toString());
-            log:printInfo("Image data preview: " + (imageData.length() > 50 ? imageData.substring(0, 50) + "..." : imageData));
 
             if medicineId == "" || imageData == "" {
                 log:printError("Missing medicine ID or image data");
                 return createErrorResponse(400, "Medicine ID and image data are required");
             }
 
-            // Validate image size (base64 is ~33% larger than original)
-            // 2MB original = ~2.67MB base64, so we'll check for reasonable limits
-            if imageData.length() > 3 * 1024 * 1024 { // 3MB limit for base64
-                log:printError("Image too large: " + imageData.length().toString() + " bytes");
-                return createErrorResponse(413, "Image file is too large. Please select an image smaller than 2MB.");
+            // Validate medicine ID format (should be UUID)
+            if !regex:matches(medicineId, "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$") {
+                log:printError("Invalid medicine ID format: " + medicineId);
+                return createErrorResponse(400, "Invalid medicine ID format");
             }
 
-            // Validate that it's actually base64 image data
-            if !imageData.startsWith("data:image/") {
-                log:printError("Invalid image format - not a valid base64 image");
-                return createErrorResponse(400, "Invalid image format. Please select a valid image file.");
-            }
-
-            // First verify the medicine belongs to this pharmacy
-            log:printInfo("Verifying medicine ownership for ID: " + medicineId + " and pharmacy: " + pharmacyId);
-            http:Response checkResponse = check supabaseClient->get("/rest/v1/medicines?id=eq." + medicineId + "&pharmacy_id=eq." + pharmacyId + "&apikey=" + supabaseKey, {
+            // First, check if the medicine exists and belongs to the pharmacy
+            log:printInfo("Checking if medicine exists: " + medicineId);
+            http:Response checkResponse = check supabaseClient->get("/rest/v1/medicines?id=eq." + medicineId + "&pharmacy_id=eq." + pharmacyId, {
                 "Authorization": "Bearer " + supabaseKey,
                 "apikey": supabaseKey,
                 "Content-Type": "application/json"
             });
 
-            log:printInfo("Medicine verification response status: " + checkResponse.statusCode.toString());
+            log:printInfo("Medicine check response status: " + checkResponse.statusCode.toString());
 
             if checkResponse.statusCode != 200 {
-                // If Supabase returns 401/403/404 etc, try to extract details
-                json|error errPayloadVar = checkResponse.getJsonPayload();
-                string why = "Unknown";
-                if errPayloadVar is json {
-                    why = errPayloadVar.toString();
-                } else if errPayloadVar is error {
-                    why = errPayloadVar.message();
+                json|error checkErrorPayload = checkResponse.getJsonPayload();
+                string checkErrorMsg = "Unknown error";
+                if checkErrorPayload is json {
+                    checkErrorMsg = checkErrorPayload.toString();
+                } else if checkErrorPayload is error {
+                    checkErrorMsg = checkErrorPayload.message();
                 }
-                log:printError("Failed to verify medicine ownership: " + checkResponse.statusCode.toString() + " details: " + why);
+                log:printError("Failed to check medicine existence: " + checkErrorMsg + " (Status: " + checkResponse.statusCode.toString() + ")");
+                return createErrorResponse(404, "Medicine not found or access denied: " + checkErrorMsg);
+            }
+
+            json|error checkResult = checkResponse.getJsonPayload();
+            if checkResult is error {
+                log:printError("Failed to parse medicine check response: " + checkResult.message());
+                return createErrorResponse(500, "Failed to verify medicine existence");
+            }
+
+            json checkData = checkResult;
+            if checkData is json[] && checkData.length() == 0 {
+                log:printError("Medicine not found or doesn't belong to pharmacy: " + medicineId);
                 return createErrorResponse(404, "Medicine not found or access denied");
             }
 
-            json medicines = check checkResponse.getJsonPayload();
-            log:printInfo("Medicine verification result: " + medicines.toString());
-            if medicines is json[] && medicines.length() == 0 {
-                log:printError("No medicines found with ID: " + medicineId + " for pharmacy: " + pharmacyId);
-                return createErrorResponse(404, "Medicine not found or access denied. Medicine ID: " + medicineId + " may not exist or you may not have permission to access it.");
-            }
+            log:printInfo("Medicine exists and belongs to pharmacy, proceeding with image upload");
 
-            log:printInfo("Medicine ownership verified successfully");
+            // Store image directly in database (like profile image)
+            log:printInfo("Storing image directly in database for medicine: " + medicineId);
 
-            // Check if image data is too long (Supabase has column limits)
-            if imageData.length() > 1000000 { // 1MB limit as example
-                log:printWarn("Image data is very large: " + imageData.length().toString() + " characters. This might exceed database column limits.");
-            }
-
-            // Update medicine with image data in Supabase using PUT
+            // Update medicine image_url in Supabase (with pharmacy ownership validation)
             map<json> updateData = {
                 "image_url": imageData
             };
 
-            log:printInfo("Updating medicine " + medicineId + " with image data using PUT");
-            log:printInfo("Update data length: " + imageData.length().toString() + " characters");
-            log:printInfo("Update data preview: " + (imageData.length() > 100 ? imageData.substring(0, 100) + "..." : imageData));
-            log:printInfo("PUT URL: " + "/rest/v1/medicines?id=eq." + medicineId + "&pharmacy_id=eq." + pharmacyId + "&apikey=" + supabaseKey);
-            http:Response response = check supabaseClient->put("/rest/v1/medicines?id=eq." + medicineId + "&pharmacy_id=eq." + pharmacyId + "&apikey=" + supabaseKey, updateData, {
+            log:printInfo("Updating medicine " + medicineId + " with image URL for pharmacy " + pharmacyId);
+            log:printInfo("Update data: " + updateData.toString());
+
+            // Include pharmacy_id in the query to ensure ownership
+            http:Response response = check supabaseClient->patch("/rest/v1/medicines?id=eq." + medicineId + "&pharmacy_id=eq." + pharmacyId, updateData, {
                 "Authorization": "Bearer " + supabaseKey,
                 "apikey": supabaseKey,
                 "Content-Type": "application/json",
@@ -888,13 +924,13 @@ service /api/v1 on httpListener {
             log:printInfo("Update response status: " + response.statusCode.toString());
 
             if response.statusCode != 200 && response.statusCode != 204 {
-                json|error errorPayloadVar = response.getJsonPayload();
+                json|error errorPayload = response.getJsonPayload();
                 string errorMsg = "Unknown error";
-                if errorPayloadVar is json {
-                    errorMsg = errorPayloadVar.toString();
+                if errorPayload is json {
+                    errorMsg = errorPayload.toString();
                     log:printError("Supabase error details: " + errorMsg);
-                } else if errorPayloadVar is error {
-                    errorMsg = errorPayloadVar.message();
+                } else if errorPayload is error {
+                    errorMsg = errorPayload.message();
                     log:printError("Response parsing error: " + errorMsg);
                 }
                 log:printError("Failed to update medicine image: " + errorMsg + " (Status: " + response.statusCode.toString() + ")");
@@ -910,8 +946,6 @@ service /api/v1 on httpListener {
             json updatedMedicine = updatedResult;
             log:printInfo("Successfully updated medicine: " + updatedMedicine.toString());
 
-            log:printInfo("Medicine image uploaded successfully for medicine: " + medicineId);
-
             http:Response res = new;
             res.setHeader("Access-Control-Allow-Origin", "*");
             res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
@@ -925,7 +959,8 @@ service /api/v1 on httpListener {
             return res;
         }
 
-        return createErrorResponse(400, "Invalid image data");
+        log:printError("Missing medicine_id or image_data in request payload");
+        return createErrorResponse(400, "Missing medicine_id or image_data in request");
     }
 
     // ANALYTICS ENDPOINT

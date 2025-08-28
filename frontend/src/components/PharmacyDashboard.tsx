@@ -374,27 +374,21 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
 
     try {
       setIsMedicineImageUploading(true);
-      
-      // Show loading toast
-      toast({
-        title: "Uploading Image",
-        description: "Please wait while we upload your image...",
-      });
 
       // Basic validation
       if (!file.type.startsWith('image/')) {
         toast({
           title: "Invalid File",
-          description: "Please select a valid image file (JPG, PNG, GIF).",
+          description: "Please select a valid image file.",
           variant: "destructive",
         });
         return;
       }
 
-      if (file.size > 2 * 1024 * 1024) { // 2MB limit for better performance
+      if (file.size > 2 * 1024 * 1024) { // 2MB limit for medicines
         toast({
           title: "File Too Large",
-          description: "Please select an image smaller than 2MB for better performance.",
+          description: "Please select an image smaller than 2MB.",
           variant: "destructive",
         });
         return;
@@ -403,49 +397,69 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
       // Convert to base64
       const reader = new FileReader();
       reader.onload = async (e) => {
+        const imageUrl = e.target?.result as string;
+        setMedicineImagePreview(imageUrl);
+
         try {
-          const base64String = e.target?.result as string;
-          
-          if (!base64String) {
-            throw new Error('Failed to read image file');
-          }
+          const token = localStorage.getItem('authToken');
+          if (!token) throw new Error('No authentication token');
 
           // If medicineId is provided, upload directly to that medicine
           if (medicineId) {
-            const token = localStorage.getItem('authToken');
-            if (!token) {
+            // Validate medicineId is not empty
+            if (!medicineId || medicineId.trim() === '') {
+              console.error('Medicine ID is empty or invalid');
               toast({
-                title: "Authentication Error",
-                description: "Please log in again.",
+                title: "Upload Failed",
+                description: "Invalid medicine ID. Please try again.",
                 variant: "destructive",
               });
               return;
             }
 
-            const response = await api.uploadMedicineImage(medicineId, base64String, token);
-            
+            console.log('Uploading image for medicine ID:', medicineId);
+            const response = await api.uploadMedicineImage(medicineId, imageUrl, token);
+
             if (response.success) {
               toast({
-                title: "Image Uploaded",
-                description: "Medicine image has been updated successfully.",
+                title: "Image Uploaded Successfully",
+                description: "Your medicine image has been updated.",
               });
 
-              // Refresh medicines to show the new image
-              await loadMedicines();
-              
-              // Clear the image preview if it was set
-              setMedicineImagePreview("");
-              
-              // Close any open edit dialogs
-              if (editingMedicine) {
-                setEditingMedicine(null);
-                setIsEditDialogOpen(false);
+              // Update the editing medicine state with the new image URL if we're in edit mode
+              if (editingMedicine && response.medicine) {
+                try {
+                  const newImageUrl = response.medicine.image_url || response.medicine.imageUrl;
+                  console.log('Updating editing medicine with new image URL:', newImageUrl);
+
+                  setEditingMedicine(prev => ({
+                    ...prev,
+                    imageUrl: newImageUrl || prev.imageUrl
+                  }));
+
+                  // Also update the image URL input field directly
+                  const imageUrlInput = document.getElementById('edit-image-url') as HTMLInputElement;
+                  if (imageUrlInput && newImageUrl) {
+                    imageUrlInput.value = newImageUrl;
+                  }
+                } catch (stateError) {
+                  console.error('Failed to update editing medicine state:', stateError);
+                }
               }
-              
+
+              // Refresh medicines to show the new image
+              try {
+                await loadMedicines();
+              } catch (refreshError) {
+                console.error('Failed to refresh medicines after image upload:', refreshError);
+              }
+
+              // Clear the image preview
+              setMedicineImagePreview("");
+
               // Clear the file input
               const fileInput = document.getElementById('medicine-image-upload') as HTMLInputElement;
               if (fileInput) fileInput.value = '';
-              
               const editFileInput = document.getElementById('edit-medicine-image-upload') as HTMLInputElement;
               if (editFileInput) editFileInput.value = '';
             } else {
@@ -453,9 +467,7 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
             }
           } else {
             // For new medicine, just set the preview
-            setMedicineImagePreview(base64String);
-            setNewMedicine(prev => ({ ...prev, imageUrl: base64String }));
-            
+            setNewMedicine(prev => ({ ...prev, imageUrl: imageUrl }));
             toast({
               title: "Image Selected",
               description: "Image has been selected for the new medicine.",
@@ -463,9 +475,9 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
           }
         } catch (error) {
           console.error('Medicine image upload error:', error);
-          
+
           let errorMessage = 'Failed to upload image. Please try again.';
-          
+
           if (error instanceof Error) {
             if (error.message.includes('connect') || error.message.includes('fetch')) {
               errorMessage = 'Unable to connect to server. Please check your internet connection.';
@@ -478,7 +490,7 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
             } else if (error.message.includes('format') || error.message.includes('type')) {
               errorMessage = 'Unsupported image format. Please use JPG, PNG, or GIF.';
             } else if (error.message.includes('500') || error.message.includes('Internal Server Error')) {
-              errorMessage = 'Server error occurred. Please try again later or contact support.';
+              errorMessage = 'Server error occurred. Please try again later.';
             } else if (error.message.includes('401') || error.message.includes('Unauthorized')) {
               errorMessage = 'Authentication failed. Please log in again.';
               localStorage.removeItem('authToken');
@@ -486,12 +498,12 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
             } else if (error.message.includes('404') || error.message.includes('Not Found')) {
               errorMessage = 'Medicine not found. Please refresh the page and try again.';
             } else if (error.message.includes('Server error occurred')) {
-              errorMessage = 'Server error occurred. Please try again later or contact support.';
+              errorMessage = 'Server error occurred. Please try again later.';
             } else if (error.message) {
               errorMessage = error.message;
             }
           }
-          
+
           toast({
             title: "Upload Failed",
             description: errorMessage,
@@ -626,6 +638,20 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
   };
 
   const handleEditMedicine = (medicine: Medicine) => {
+    console.log('Editing medicine:', medicine);
+    console.log('Medicine ID:', medicine.id);
+    console.log('Medicine ID type:', typeof medicine.id);
+    
+    if (!medicine.id) {
+      console.error('Medicine has no ID:', medicine);
+      toast({
+        title: "Error",
+        description: "This medicine cannot be edited - missing ID. Please refresh the page.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setEditingMedicine(medicine);
     setIsEditDialogOpen(true);
   };
@@ -1889,7 +1915,19 @@ export const PharmacyDashboard = ({ onLogout }: PharmacyDashboardProps) => {
                       id="edit-medicine-image-upload"
                       type="file"
                       accept="image/*"
-                      onChange={(e) => handleMedicineImageUpload(e, editingMedicine.id)}
+                      onChange={(e) => {
+                        const medicineId = editingMedicine?.id;
+                        if (!medicineId) {
+                          console.error('No medicine ID available for image upload');
+                          toast({
+                            title: "Error",
+                            description: "Unable to upload image - medicine ID not found.",
+                            variant: "destructive",
+                          });
+                          return;
+                        }
+                        handleMedicineImageUpload(e, medicineId);
+                      }}
                       className="hidden"
                     />
                   </div>
