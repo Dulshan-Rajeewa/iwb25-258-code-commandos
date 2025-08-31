@@ -148,7 +148,7 @@ The frontend will start on `http://localhost:5173`
 2. **Run Database Migrations**
    ```sql
    -- Execute these in your Supabase SQL Editor
-   -- Copy from backend/schema.sql and backend/README_DATABASE_UPDATES.md
+   -- Copy from backend/schema.sql
    ```
 
 ## 📁 Project Structure
