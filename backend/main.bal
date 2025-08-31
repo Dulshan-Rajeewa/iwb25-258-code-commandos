@@ -4,9 +4,9 @@ import ballerina/uuid;
 import ballerina/time;
 import ballerina/regex;
 
-configurable string supabaseUrl = "https://sjtzzxqopnyouktcgwwg.supabase.co";
-configurable string supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNqdHp6eHFvcG55b3VrdGNnd3dnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQyMjA3OTcsImV4cCI6MjA2OTc5Njc5N30.ahvznD6ER2eRz8HE5NkXMOF7epq3v3Zp3GWrvZSplWY";
-configurable string countriesApiKey = "NbbEYeZKCdhqG4nmyzcfUHchbhsANAif8kovpiSq";
+configurable string supabaseUrl = "";
+configurable string supabaseKey = "";
+configurable string countriesApiKey = "";
 
 http:Client supabaseClient = check new (supabaseUrl, {
     timeout: 60,
