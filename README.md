@@ -523,39 +523,6 @@ VITE_API_BASE_URL=https://your-api-domain.com/api/v1
 VITE_SUPABASE_URL=https://your-prod-project.supabase.co
 ```
 
-## 🤝 Contributing
-
-We welcome contributions! Please follow these steps:
-
-### 1. Fork the Repository
-```bash
-git clone https://github.com/your-username/medi-hunt.git
-```
-
-### 2. Create a Feature Branch
-```bash
-git checkout -b feature/amazing-feature
-```
-
-### 3. Make Your Changes
-- Follow the existing code style
-- Add tests for new features
-- Update documentation
-
-### 4. Commit Your Changes
-```bash
-git commit -m 'Add amazing feature'
-```
-
-### 5. Push to the Branch
-```bash
-git push origin feature/amazing-feature
-```
-
-### 6. Open a Pull Request
-- Provide a clear description of your changes
-- Reference any related issues
-
 ### Development Guidelines
 
 - **Code Style**: Follow TypeScript and React best practices
@@ -578,8 +545,8 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 If you have any questions or need help:
 
-- **Issues**: [GitHub Issues](https://github.com/Dulshan-Rajeewa/medi-hunt/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/Dulshan-Rajeewa/medi-hunt/discussions)
+- **Issues**: [GitHub Issues](https://github.com/Dulshan-Rajeewa/iwb25-258-code-commandos/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Dulshan-Rajeewa/iwb25-258-code-commandos/discussions)
 - **Email**: dulshanrj1@gmail.com / behanravishka03@gmail.com
 
 ---
